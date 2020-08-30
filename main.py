@@ -13,17 +13,40 @@ import argparse
 
 from models import *
 from utils import progress_bar
+from loss import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
+parser.add_argument("--loss",type=str,default="CE",choices=["CE","CS"])
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+save_path = os.path.join("checkpoint",args.loss+"_"+args.net)
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
+
+# model dict
+net_dict = {"VGG19":VGG('VGG19'),
+            "ResNet18": ResNet18(),
+            "PreActResNet18": PreActResNet18(),
+            "GoogLeNet":GoogLeNet(),
+            "DenseNet121":DenseNet121(),
+            "ResNeXt29_2x64d":ResNeXt29_2x64d(),
+            "MobileNet":MobileNet(),
+            "MobileNetV2":MobileNetV2(),
+            "DPN92": DPN92(),
+            # "ShuffleNetG2":ShuffleNetG2(),
+            "SENet18":SENet18(),
+            "ShuffleNetV2":ShuffleNetV2(1),
+            "EfficientNetB0":EfficientNetB0(),
+            "RegNetX_200MF":RegNetX_200MF()
+}
 
 # Data
 print('==> Preparing data..')
@@ -40,12 +63,12 @@ transform_test = transforms.Compose([
 ])
 
 trainset = torchvision.datasets.CIFAR10(
-    root='./data', train=True, download=True, transform=transform_train)
+    root='/home/Leeyegy/.torch/datasets', train=True, download=True, transform=transform_train)
 trainloader = torch.utils.data.DataLoader(
     trainset, batch_size=128, shuffle=True, num_workers=2)
 
 testset = torchvision.datasets.CIFAR10(
-    root='./data', train=False, download=True, transform=transform_test)
+    root='/home/Leeyegy/.torch/datasets', train=False, download=True, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
     testset, batch_size=100, shuffle=False, num_workers=2)
 
@@ -54,20 +77,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
 
 # Model
 print('==> Building model..')
-# net = VGG('VGG19')
-# net = ResNet18()
-# net = PreActResNet18()
-# net = GoogLeNet()
-# net = DenseNet121()
-# net = ResNeXt29_2x64d()
-# net = MobileNet()
-# net = MobileNetV2()
-# net = DPN92()
-# net = ShuffleNetG2()
-# net = SENet18()
-# net = ShuffleNetV2(1)
-# net = EfficientNetB0()
-net = RegNetX_200MF()
+net = net_dict[args.net]
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -77,15 +87,14 @@ if args.resume:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.pth')
+    checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss() if args.loss == "CE" else Cosine_Similarity_Loss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
-
 
 # Training
 def train(epoch):
@@ -103,9 +112,9 @@ def train(epoch):
         optimizer.step()
 
         train_loss += loss.item()
-        _, predicted = outputs.max(1)
         total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
+
+        correct += get_correct_num(outputs,targets,args.loss)
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
@@ -124,13 +133,12 @@ def test(epoch):
             loss = criterion(outputs, targets)
 
             test_loss += loss.item()
-            _, predicted = outputs.max(1)
             total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+
+            correct += get_correct_num(outputs,targets,args.loss)
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-
     # Save checkpoint.
     acc = 100.*correct/total
     if acc > best_acc:
@@ -142,10 +150,21 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.pth')
+        torch.save(state, os.path.join(save_path,'ckpt.pth'))
         best_acc = acc
 
 
-for epoch in range(start_epoch, start_epoch+200):
+def adjust_learning_rate(optimizer, epoch):
+    """decrease the learning rate"""
+    lr = args.lr
+    if epoch >= 150:
+        lr = args.lr * 0.1
+    if epoch >= 250:
+        lr = args.lr * 0.01
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+for epoch in range(start_epoch, 300):
+    adjust_learning_rate(optimizer,epoch)
     train(epoch)
     test(epoch)

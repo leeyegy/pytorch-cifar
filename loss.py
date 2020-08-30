@@ -16,18 +16,22 @@ target_map = {"0":torch.from_numpy(np.asarray([0,0.333,0.333,0.333,0.333,0.333,0
        "9":torch.from_numpy(np.asarray([0,-0.707,5.103e-16,1.178e-15,1.963e-16,-1.57e-16,3.140e-16,-3.925e-17,-2.355e-16,0.707]))}
 
 
-def get_correct_num(output,target):
+def get_correct_num(output,target,loss):
     """
     :param output: [N,10] | cuda tensor
     :param target: [N,]  | cuda tensor
     :return:
     """
-    score = torch.FloatTensor(output.size()).to(output)
-    for k in range(output.size()[0]):
-        for i in range(10):
-            score[k,i]=(target_map[str(i)].cuda().float()*output[k]).sum()
-    pred = score.max(1,keepdim=True)[1]
-    return pred.eq(target.view_as(pred)).sum().item()
+    if loss == "CE":
+        _, predicted = output.max(1)
+        return predicted.eq(target).sum().item()
+    else:
+        score = torch.FloatTensor(output.size()).to(output)
+        for k in range(output.size()[0]):
+            for i in range(10):
+                score[k,i]=(target_map[str(i)].cuda().float()*output[k]).sum()
+        pred = score.max(1,keepdim=True)[1]
+        return pred.eq(target.view_as(pred)).sum().item()
 
 class Cosine_Similarity_Loss(nn.Module):
     def __init__(self):
