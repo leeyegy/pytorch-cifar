@@ -140,24 +140,25 @@ def test(epoch):
     pgd_correct = 0
     correct = 0
     total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+    for batch_idx, (inputs, targets) in enumerate(testloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        with torch.no_grad():
             outputs = net(inputs)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item()
-            total += targets.size(0)
-            correct += get_correct_num(outputs,targets,args.loss)
+        loss = criterion(outputs, targets)
+        test_loss += loss.item()
+        total += targets.size(0)
+        correct += get_correct_num(outputs,targets,args.loss)
 
-            with ctx_noparamgrad_and_eval(net):
-                pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
+        with ctx_noparamgrad_and_eval(net):
+            pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
+        with torch.no_grad():
             outputs = net(pgd_data)
-            loss = criterion(outputs, targets)
-            pgd_loss += loss.item()
-            pgd_correct += get_correct_num(outputs,targets,args.loss)
+        loss = criterion(outputs, targets)
+        pgd_loss += loss.item()
+        pgd_correct += get_correct_num(outputs,targets,args.loss)
 
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
-                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
+                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
