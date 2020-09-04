@@ -15,7 +15,7 @@ from models import *
 from utils import progress_bar
 from loss import *
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
-from advertorch.context import ctx_noparamgrad_adn_eval
+from advertorch.context import ctx_noparamgrad_and_eval
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -116,7 +116,7 @@ def train(epoch):
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
-        with ctx_noparamgrad_adn_eval(net):
+        with ctx_noparamgrad_and_eval(net):
             adv_data = adversary.perturb(inputs,targets)
         outputs = net(adv_data)
         loss = criterion(outputs, targets)
@@ -149,7 +149,7 @@ def test(epoch):
             total += targets.size(0)
             correct += get_correct_num(outputs,targets,args.loss)
 
-            with ctx_noparamgrad_adn_eval(net):
+            with ctx_noparamgrad_and_eval(net):
                 pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
             outputs = net(pgd_data)
             loss = criterion(outputs, targets)
