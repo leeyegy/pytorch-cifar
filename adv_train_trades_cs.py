@@ -135,7 +135,7 @@ def eval_test(model, device, test_loader):
         test_loss += criterion(output, target).item()
         correct += get_correct_num(output,target,"CS")
 
-        with ctx_noparamgrad_and_eval(net):
+        with ctx_noparamgrad_and_eval(model):
             pgd_data = PGD_adversary.perturb(data.clone().detach(), target)
         with torch.no_grad():
             output = net(pgd_data)
