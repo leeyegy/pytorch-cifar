@@ -19,21 +19,16 @@ from advertorch.context import ctx_noparamgrad_and_eval
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
-parser.add_argument('--resume', '-r', action='store_true',
-                    help='resume from checkpoint')
+parser.add_argument('--test_model_path', type=str)
 parser.add_argument("--loss",type=str,default="CE",choices=["CE","CS"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
+
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
-start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",args.loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
-if not os.path.exists(save_path):
-    os.makedirs(save_path)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
@@ -87,18 +82,16 @@ if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if args.resume:
-    # Load checkpoint.
-    print('==> Resuming from checkpoint..')
-    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
+if args.loss == "CS":
+    checkpoint = torch.load(os.path.join(args.test_model_path))
     net.load_state_dict(checkpoint['net'])
-    best_acc = checkpoint['acc']
-    start_epoch = checkpoint['epoch']
+elif args.loss == "CE":
+    net.load_state_dict(torch.load(os.path.join(args.test_model_path)))
+# best_acc = checkpoint['acc']
+# # start_epoch = checkpoint['epoch']
 
 criterion = nn.CrossEntropyLoss() if args.loss == "CE" else Cosine_Similarity_Loss()
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                      momentum=0.9, weight_decay=5e-4)
+
 
 
 #define adversary
@@ -106,35 +99,9 @@ if args.attack_method == "FGSM":
     adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=criterion,clip_min=0.0,clip_max=1.0)
 elif args.attack_method == "PGD":
     adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=criterion,rand_init=True)
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_fn=criterion,rand_init=True)
-
-# Training
-def train(epoch):
-    print('\nEpoch: %d' % epoch)
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        with ctx_noparamgrad_and_eval(net):
-            adv_data = adversary.perturb(inputs,targets)
-        outputs = net(adv_data)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item()
-        total += targets.size(0)
-
-        correct += get_correct_num(outputs,targets,args.loss)
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
-def test(epoch):
+def test():
     global best_acc
     net.eval()
     test_loss = 0
@@ -152,7 +119,7 @@ def test(epoch):
         correct += get_correct_num(outputs,targets,args.loss)
 
         with ctx_noparamgrad_and_eval(net):
-            pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
+            pgd_data = adversary.perturb(inputs.clone().detach(), targets)
         with torch.no_grad():
             outputs = net(pgd_data)
         loss = criterion(outputs, targets)
@@ -161,54 +128,5 @@ def test(epoch):
 
         progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
-    # Save checkpoint.
-    acc = 100.*pgd_correct/total
-    if acc > best_acc:
-        print('Saving..')
-        state = {
-            'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-        }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'))
-        best_acc = acc
-    if epoch == 119:
-        print('Saving Last..')
-        state = {
-            'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-        }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
 
-
-def adjust_learning_rate(optimizer, epoch):
-    """decrease the learning rate"""
-    lr = args.lr
-    if epoch >= 75:
-        lr = args.lr * 0.1
-    if epoch >= 90:
-        lr = args.lr * 0.01
-    if epoch >= 100:
-        lr = args.lr * 0.001
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
-# def adjust_learning_rate(optimizer, epoch):
-#     """decrease the learning rate"""
-#     lr = args.lr
-#     if epoch >= 150:
-#         lr = args.lr * 0.1
-#     if epoch >= 250:
-#         lr = args.lr * 0.01
-#     for param_group in optimizer.param_groups:
-#         param_group['lr'] = lr
-
-for epoch in range(start_epoch, 120):
-    adjust_learning_rate(optimizer,epoch)
-    train(epoch)
-    test(epoch)
+test()
