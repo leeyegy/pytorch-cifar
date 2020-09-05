@@ -144,8 +144,8 @@ def eval_test(model, device, test_loader):
     test_loss /= len(test_loader.dataset)
     print('Test: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%), PgdAccuracy: {}/{} ({:.0f}%)'.format(
         test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
-    test_accuracy = correct / len(test_loader.dataset,pgd_correct,len(test_loader.dataset),100.*pgd_correct/len(test_loader.dataset))
+        100. * correct / len(test_loader.dataset),pgd_correct,len(test_loader.dataset),100.*pgd_correct/len(test_loader.dataset)))
+    test_accuracy = correct / len(test_loader.dataset)
     return test_loss, test_accuracy
 
 
