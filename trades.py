@@ -13,6 +13,7 @@ def squared_l2_norm(x):
 
 def l2_norm(x):
     return squared_l2_norm(x).sqrt()
+criterion = Cosine_Similarity_Loss()
 
 
 def trades_CS_loss(model,
@@ -34,8 +35,9 @@ def trades_CS_loss(model,
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
             with torch.enable_grad():
-                loss_kl = criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                       F.softmax(model(x_natural), dim=1))
+                # loss_kl = criterion_kl(F.log_softmax(model(x_adv), dim=1),
+                #                        F.softmax(model(x_natural), dim=1))
+                loss_kl = criterion(model(x_adv),y)
 
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
@@ -79,8 +81,10 @@ def trades_CS_loss(model,
     optimizer.zero_grad()
     # calculate robust loss
     logits = model(x_natural)
+    output = model(x_adv)
     loss_natural = Cosine_Similarity_Loss()(logits, y)
-    loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                                    F.softmax(model(x_natural), dim=1))
+    loss_robust = Cosine_Similarity_Loss()(output, y)
+    # loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),
+    #                                                 F.softmax(model(x_natural), dim=1))
     loss = loss_natural + beta * loss_robust
-    return loss
+    return loss,output

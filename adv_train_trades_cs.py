@@ -7,6 +7,8 @@ import torch.nn.functional as F
 import torchvision
 import torch.optim as optim
 from torchvision import datasets, transforms
+from utils import progress_bar
+
 
 from models import *
 from trades import trades_CS_loss
@@ -80,13 +82,17 @@ PGD_adversary = LinfPGDAttack(model,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_f
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = trades_CS_loss(model=model,
+        loss,output = trades_CS_loss(model=model,
                            x_natural=data,
                            y=target,
                            optimizer=optimizer,
@@ -96,12 +102,13 @@ def train(args, model, device, train_loader, optimizer, epoch):
                            beta=args.beta)
         loss.backward()
         optimizer.step()
+        train_loss += loss.item()
+        total += target.size(0)
 
-        # print progress
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss.item()))
+        correct += get_correct_num(output,target,"CS")
+
+        progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
 def eval_train(model, device, train_loader):
@@ -128,25 +135,25 @@ def eval_test(model, device, test_loader):
     test_loss = 0
     correct = 0
     pgd_correct = 0
-    for data, target in test_loader:
+    total = 0
+
+    for batch_idx, (data, target) in enumerate(test_loader):
         data, target = data.to(device), target.to(device)
         with torch.no_grad():
             output = model(data)
         test_loss += criterion(output, target).item()
         correct += get_correct_num(output,target,"CS")
+        total += target.size(0)
 
         with ctx_noparamgrad_and_eval(model):
             pgd_data = PGD_adversary.perturb(data.clone().detach(), target)
         with torch.no_grad():
             output = model(pgd_data)
         pgd_correct += get_correct_num(output, target, "CS")
+        progress_bar(batch_idx, len(test_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
+                     % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total, 100. * pgd_correct / total,
+                        pgd_correct, total))
 
-    test_loss /= len(test_loader.dataset)
-    print('Test: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%), PgdAccuracy: {}/{} ({:.0f}%)'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset),pgd_correct,len(test_loader.dataset),100.*pgd_correct/len(test_loader.dataset)))
-    test_accuracy = correct / len(test_loader.dataset)
-    return test_loss, test_accuracy
 
 
 def adjust_learning_rate(optimizer, epoch):
