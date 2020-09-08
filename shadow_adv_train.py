@@ -27,6 +27,8 @@ parser.add_argument("--loss",type=str,default="CE",choices=["CE","CS"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
 parser.add_argument("--source-model-path",type=str)
+parser.add_argument("--val_only",default=False,action="store_true")
+
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -113,6 +115,7 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 
 
+
 #define adversary
 if args.attack_method == "FGSM":
     adversary = GradientSignAttack(source_net,eps=args.epsilon,loss_fn=criterion,clip_min=0.0,clip_max=1.0)
@@ -132,7 +135,7 @@ def train(epoch):
         optimizer.zero_grad()
         # load adv data based on source_model
         with ctx_noparamgrad_and_eval(source_net):
-            adv_data = adversary.perturb(inputs,targets)
+            adv_data = adversary.perturb(inputs)
         # train shadow net
         outputs = net(adv_data)
         loss = criterion(outputs, targets)
@@ -167,7 +170,7 @@ def test(epoch):
         correct += get_correct_num(outputs,targets,args.loss)
 
         with ctx_noparamgrad_and_eval(source_net):
-            adv_data = adversary.perturb(inputs,targets)
+            adv_data = adversary.perturb(inputs)
         with torch.no_grad():
             outputs = net(adv_data)
         ori_pgd_correct += get_correct_num(outputs,targets,args.loss)
@@ -184,6 +187,8 @@ def test(epoch):
 
         progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) Ori_pgdAcc:%.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*ori_pgd_correct/total,ori_pgd_correct,total,100.*pgd_correct/total,pgd_correct,total))
+    if args.val_only:
+        return
     # Save checkpoint.
     acc = 100.*ori_pgd_correct/total
     if acc > best_acc:
@@ -209,29 +214,31 @@ def test(epoch):
         torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
 
 
-def adjust_learning_rate(optimizer, epoch):
-    """decrease the learning rate"""
-    lr = args.lr
-    if epoch >= 75:
-        lr = args.lr * 0.1
-    if epoch >= 90:
-        lr = args.lr * 0.01
-    if epoch >= 100:
-        lr = args.lr * 0.001
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
 # def adjust_learning_rate(optimizer, epoch):
 #     """decrease the learning rate"""
 #     lr = args.lr
-#     if epoch >= 150:
+#     if epoch >= 75:
 #         lr = args.lr * 0.1
-#     if epoch >= 250:
+#     if epoch >= 90:
 #         lr = args.lr * 0.01
+#     if epoch >= 100:
+#         lr = args.lr * 0.001
 #     for param_group in optimizer.param_groups:
 #         param_group['lr'] = lr
 
-for epoch in range(start_epoch, 120):
+def adjust_learning_rate(optimizer, epoch):
+    """decrease the learning rate"""
+    lr = args.lr
+    if epoch >= 150:
+        lr = args.lr * 0.1
+    if epoch >= 250:
+        lr = args.lr * 0.01
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+if args.val_only:
+    test(300)
+    start_epoch = 300
+for epoch in range(start_epoch, 300):
     adjust_learning_rate(optimizer,epoch)
     train(epoch)
     test(epoch)
