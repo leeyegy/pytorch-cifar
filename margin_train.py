@@ -32,7 +32,7 @@ args = parser.parse_args()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","margin_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+save_path = os.path.join("checkpoint","margin_"+args.net,"anchor_"+str(args.margin_adv_anchor)+"_"+"most_confusing_"+str(args.margin_adv_most_confusing),args.attack_method+"_"+str(args.epsilon))
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 # model dict
