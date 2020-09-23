@@ -110,7 +110,8 @@ class Focal_Loss(nn.Module):
             output = (one_hot * phi ) + ((1.0-one_hot)*output)
             output *= self.s
         elif self.mode == "normal":
-            print("normal_mode")
+            # print("normal_mode")
+            pass
         logp = self.ce(output,target)
         p = torch.exp(-logp)
         loss = (1-p) ** self.gamma * logp
