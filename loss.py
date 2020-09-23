@@ -26,7 +26,7 @@ def get_correct_num(output,target,loss):
         _, predicted = output.max(1)
         return predicted.eq(target).sum().item()
     else:
-        output_ = torch.sqrt(torch.sum(output * output, dim=1))
+        output_ = torch.sqrt(torch.sum(output * output, dim=1)).view([output.size()[0],1])
         output = output / output_ # normalization
         score = torch.FloatTensor(output.size()).to(output)
         for k in range(output.size()[0]):
@@ -40,8 +40,9 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         super(Margin_Cosine_Similarity_Loss,self).__init__()
         self.margin_adv_anchor = margin_adv_anchor
         self.margin_adv_most_confusing = margin_adv_most_confusing
-        assert self.margin_adv_most_confusing<1and self.margin_adv_most_confusing>0
-        assert self.margin_adv_anchor<1and self.margin_adv_anchor>0
+        assert self.margin_adv_most_confusing<=1and self.margin_adv_most_confusing>=0
+        assert self.margin_adv_anchor<=1and self.margin_adv_anchor>=0
+        assert self.margin_adv_most_confusing - self.margin_adv_anchor >= 0
 
     def forward(self,x1,target):
         """
@@ -59,15 +60,15 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         adv_anchor_cos = 1.0 - adv_anchor_cos
 
         # get most confusing label
-        x1 = x1 / x1_ # normalization
+        x1 = x1 / x1_.view([x1.size()[0],1]) # normalization
         score = torch.FloatTensor(x1.size()).to(x1)
         for k in range(x1.size()[0]):
             for i in range(10):
                 score[k,i]=(target_map[str(i)].cuda().float()*x1[k]).sum()
-        score,_ = torch.sort(score,dim=1,descending=True)
+        score,index = torch.sort(score,dim=1,descending=True)
         most_confusing_label = torch.LongTensor(target.size()).to(target)
         for i in range(most_confusing_label.size()[0]):
-            most_confusing_label[i] = score[i,0] if score[i,0] != target[i] else score[i,1]
+            most_confusing_label[i] = index[i,0] if index[i,0] != target[i] else index[i,1]
 
         # calculate the distance between adv and most confusing label
         x2 = torch.DoubleTensor(x1.size()).to(x1)
@@ -79,9 +80,11 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         adv_most_confusing_cos = 1.0 - adv_most_confusing_cos
 
         # calculate final loss
-        penalty_loss = torch.max(self.margin_adv_most_confusing-adv_most_confusing_cos,0) # if adv_most_confusing_cos is bigger than margin, then let it go
-        anchor_loss = torch.max(adv_anchor_cos-self.margin_adv_anchor,0) # if adv_anchor_cos is smaller than margin, then let it go;; do not push the dis towards 0
-        loss = torch.mean(penalty_loss + anchor_loss)
+        penalty_loss = self.margin_adv_most_confusing-adv_most_confusing_cos
+        penalty_loss[penalty_loss<0] = 0 # if adv_most_confusing_cos is bigger than margin, then let it go
+        anchor_loss = adv_anchor_cos-self.margin_adv_anchor
+        anchor_loss[anchor_loss<0] = 0 # if adv_anchor_cos is smaller than margin, then let it go;; do not push the dis towards 0
+        loss = (penalty_loss + anchor_loss).mean() # non-negative
         return loss
 
 class Cosine_Similarity_Loss(nn.Module):
@@ -91,7 +94,7 @@ class Cosine_Similarity_Loss(nn.Module):
         """
         :param x1: output of model
         :param target: hard ground truth label
-        :return: loss value: >=0 (notice that it can be bigger than one )
+        :return: loss value: >=0 (notice that it can be [0,2] )
         """
         x2 = torch.DoubleTensor(x1.size()).to(x1)
         for i in range(x2.size()[0]):

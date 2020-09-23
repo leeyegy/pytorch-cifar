@@ -122,15 +122,15 @@ def train(epoch):
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
 
-        # train clean data
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = clean_criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-
-        clean_loss += loss.item()
-        clean_correct += get_correct_num(outputs,targets,"CS")
+        # # train clean data
+        # optimizer.zero_grad()
+        # outputs = net(inputs)
+        # loss = clean_criterion(outputs, targets)
+        # loss.backward()
+        # optimizer.step()
+        #
+        # clean_loss += loss.item()
+        # clean_correct += get_correct_num(outputs,targets,"CS")
 
 
         # train adv data
@@ -147,8 +147,13 @@ def train(epoch):
         adv_correct += get_correct_num(outputs,targets,"CS")
 
         # log
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Clean Acc: %.3f%% (%d/%d) Adv Acc: %.3f%% (%d/%d)'
-                     % (clean_loss/(batch_idx+1), 100.*clean_correct/total, clean_correct, total,100.*adv_correct/total, adv_correct, total))
+        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f |dv Acc: %.3f%% (%d/%d)'
+                     % (clean_loss/(batch_idx+1),100.*adv_correct/total, adv_correct, total))
+
+
+        # # log
+        # progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Clean Acc: %.3f%% (%d/%d) Adv Acc: %.3f%% (%d/%d)'
+        #              % (clean_loss/(batch_idx+1), 100.*clean_correct/total, clean_correct, total,100.*adv_correct/total, adv_correct, total))
 
 
 def test(epoch):
