@@ -88,26 +88,29 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         return loss
 
 class Focal_Loss(nn.Module):
-    def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7):
+    def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine"):
         super(Focal_Loss,self).__init__()
         self.s = s
         self.m = m
         self.gamma= gamma
         self.eps = eps
         self.ce = nn.CrossEntropyLoss()
-    def forward(self,input,target):
+        self.mode = mode
+    def forward(self,output,target):
         """
         :param input: output of model
         :param target: hard ground truth label
         :return: loss value
         """
-        phi = input -self.m
-        one_hot = torch.zeros(input.size())
-        one_hot.scatter_(1,target.view(-1,1).long().cpu(),1)
-        one_hot = one_hot.cuda()
-        output = (one_hot * phi ) + ((1.0-one_hot)*input)
-        output *= self.s
-
+        if self.mode == "cosine":
+            phi = output -self.m
+            one_hot = torch.zeros(output.size())
+            one_hot.scatter_(1,target.view(-1,1).long().cpu(),1)
+            one_hot = one_hot.cuda()
+            output = (one_hot * phi ) + ((1.0-one_hot)*output)
+            output *= self.s
+        elif self.mode == "normal":
+            print("normal_mode")
         logp = self.ce(output,target)
         p = torch.exp(-logp)
         loss = (1-p) ** self.gamma * logp

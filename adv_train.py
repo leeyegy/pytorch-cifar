@@ -105,6 +105,8 @@ if args.resume:
 
 
 criterion = loss_dict[args.min_loss]
+if args.net != "ResNet18_cosine":
+    criterion.mode == "normal"
 adversary_loss = loss_dict[args.max_loss]
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
