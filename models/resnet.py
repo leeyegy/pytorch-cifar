@@ -84,7 +84,7 @@ class ResNet_cosine(nn.Module):
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
 
         # for cosine
-        self.weight = Parameter(torch.FloatTensor(512*block.expansion,num_classes))
+        self.weight = Parameter(torch.FloatTensor(num_classes,512*block.expansion))
         nn.init.xavier_uniform_(self.weight)
         # self.linear = nn.Linear(512*block.expansion, num_classes)
 
@@ -107,10 +107,8 @@ class ResNet_cosine(nn.Module):
 
         # FOR COSINE
         cosine = F.linear(F.normalize(out),F.normalize(self.weight))
-        # phi = cosine - self.m
-
         # out = self.linear(out)
-        return out
+        return cosine
 
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):

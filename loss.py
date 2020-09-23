@@ -103,7 +103,8 @@ class Focal_Loss(nn.Module):
         """
         phi = input -self.m
         one_hot = torch.zeros(input.size())
-        one_hot.scatter_(1,target.view(-1,1).long(),1)
+        one_hot.scatter_(1,target.view(-1,1).long().cpu(),1)
+        one_hot = one_hot.cuda()
         output = (one_hot * phi ) + ((1.0-one_hot)*input)
         output *= self.s
 
