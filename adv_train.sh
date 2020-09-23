@@ -1,8 +1,8 @@
-for net in ResNet18_cosine
+for net in ResNet18_dbn
 do 
 for max_loss in CE
 do 
-	for min_loss in FOCAL
+	for min_loss in CE
 	do
 	for attack in PGD
 	do 
