@@ -23,7 +23,8 @@ parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--loss",type=str,default="CE",choices=["CE","CS"])
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
+parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
 args = parser.parse_args()
@@ -31,13 +32,14 @@ args = parser.parse_args()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",args.loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+save_path = os.path.join("checkpoint",args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
             "ResNet18": ResNet18(),
+            "ResNet18_cosine":ResNet18_cosine(),
             "PreActResNet18": PreActResNet18(),
             "GoogLeNet":GoogLeNet(),
             "DenseNet121":DenseNet121(),
@@ -50,6 +52,11 @@ net_dict = {"VGG19":VGG('VGG19'),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF()
+}
+
+loss_dict = {"CE":nn.CrossEntropyLoss() ,
+            "CS": Cosine_Similarity_Loss(),
+            "FOCAL":Focal_Loss()
 }
 
 # Data
@@ -96,17 +103,19 @@ if args.resume:
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
-criterion = nn.CrossEntropyLoss() if args.loss == "CE" else Cosine_Similarity_Loss()
+
+criterion = loss_dict[args.min_loss]
+adversary_loss = loss_dict[args.max_loss]
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 
 
 #define adversary
 if args.attack_method == "FGSM":
-    adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=criterion,clip_min=0.0,clip_max=1.0)
+    adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=adversary_loss,clip_min=0.0,clip_max=1.0)
 elif args.attack_method == "PGD":
-    adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=criterion,rand_init=True)
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_fn=criterion,rand_init=True)
+    adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 
 # Training
 def train(epoch):
@@ -128,7 +137,7 @@ def train(epoch):
         train_loss += loss.item()
         total += targets.size(0)
 
-        correct += get_correct_num(outputs,targets,args.loss)
+        correct += get_correct_num(outputs,targets,args.max_loss)
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
@@ -149,7 +158,7 @@ def test(epoch):
         loss = criterion(outputs, targets)
         test_loss += loss.item()
         total += targets.size(0)
-        correct += get_correct_num(outputs,targets,args.loss)
+        correct += get_correct_num(outputs,targets,args.max_loss)
 
         with ctx_noparamgrad_and_eval(net):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
@@ -157,7 +166,7 @@ def test(epoch):
             outputs = net(pgd_data)
         loss = criterion(outputs, targets)
         pgd_loss += loss.item()
-        pgd_correct += get_correct_num(outputs,targets,args.loss)
+        pgd_correct += get_correct_num(outputs,targets,args.max_loss)
 
         progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))

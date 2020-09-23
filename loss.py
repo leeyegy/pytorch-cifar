@@ -22,10 +22,7 @@ def get_correct_num(output,target,loss):
     :param target: [N,]  | cuda tensor
     :return:
     """
-    if loss == "CE":
-        _, predicted = output.max(1)
-        return predicted.eq(target).sum().item()
-    else:
+    if loss == "CS":
         output_ = torch.sqrt(torch.sum(output * output, dim=1))
         output = output / output_ # normalization
         score = torch.FloatTensor(output.size()).to(output)
@@ -34,6 +31,12 @@ def get_correct_num(output,target,loss):
                 score[k,i]=(target_map[str(i)].cuda().float()*output[k]).sum()
         pred = score.max(1,keepdim=True)[1]
         return pred.eq(target.view_as(pred)).sum().item()
+
+    else:
+        # focal loss and ce loss
+        _, predicted = output.max(1)
+        return predicted.eq(target).sum().item()
+
 
 class Margin_Cosine_Similarity_Loss(nn.Module):
     def __init__(self,margin_adv_anchor,margin_adv_most_confusing):
@@ -83,6 +86,32 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         anchor_loss = torch.max(adv_anchor_cos-self.margin_adv_anchor,0) # if adv_anchor_cos is smaller than margin, then let it go;; do not push the dis towards 0
         loss = torch.mean(penalty_loss + anchor_loss)
         return loss
+
+class Focal_Loss(nn.Module):
+    def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7):
+        super(Focal_Loss,self).__init__()
+        self.s = s
+        self.m = m
+        self.gamma= gamma
+        self.eps = eps
+        self.ce = nn.CrossEntropyLoss()
+    def forward(self,input,target):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        phi = input -self.m
+        one_hot = torch.zeros(input.size())
+        one_hot.scatter_(1,target.view(-1,1).long(),1)
+        output = (one_hot * phi ) + ((1.0-one_hot)*input)
+        output *= self.s
+
+        logp = self.ce(output,target)
+        p = torch.exp(-logp)
+        loss = (1-p) ** self.gamma * logp
+        return  loss.mean()
+
 
 class Cosine_Similarity_Loss(nn.Module):
     def __init__(self):
