@@ -25,7 +25,7 @@ parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
-parser.add_argument("--attack_method",type=str,default="FGSM")
+parser.add_argument("--attack_method",type=str,default="PGD")
 parser.add_argument("--epsilon",type=float,default=0.03137)
 args = parser.parse_args()
 
@@ -114,7 +114,7 @@ if args.attack_method == "FGSM":
     adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=adversary_loss,clip_min=0.0,clip_max=1.0)
 elif args.attack_method == "PGD":
     adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 
 # Training
 def train(epoch):
@@ -150,6 +150,7 @@ def test(epoch):
     net.eval()
     test_loss = 0
     pgd_loss = 0
+    cln_bn_pgd_correct = 0
     pgd_correct = 0
     correct = 0
     total = 0
@@ -166,12 +167,14 @@ def test(epoch):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
         with torch.no_grad():
             outputs = net(pgd_data,mode="adv")
+            cln_bn_outputs = net(pgd_data)
         loss = criterion(outputs, targets)
         pgd_loss += loss.item()
         pgd_correct += get_correct_num(outputs,targets,args.max_loss)
+        cln_bn_pgd_correct += get_correct_num(cln_bn_outputs,targets,args.max_loss)
 
-        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
-                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d) PgdClnBnAcc:%.3f%% (%d/%d)'
+                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total,100.*cln_bn_pgd_correct/total,cln_bn_pgd_correct,total))
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:

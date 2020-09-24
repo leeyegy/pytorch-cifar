@@ -16,14 +16,15 @@ from utils import progress_bar
 from loss import *
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
-
+from tensorboardX import SummaryWriter
+from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss"])
 parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
@@ -35,6 +36,10 @@ start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 save_path = os.path.join("checkpoint",args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
 if not os.path.exists(save_path):
     os.makedirs(save_path)
+
+# define tensorboard
+exp_name = os.path.join("runs", args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+writer = SummaryWriter(exp_name)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
@@ -117,7 +122,7 @@ if args.attack_method == "FGSM":
     adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=adversary_loss,clip_min=0.0,clip_max=1.0)
 elif args.attack_method == "PGD":
     adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 
 # Training
 def train(epoch):
@@ -126,13 +131,25 @@ def train(epoch):
     train_loss = 0
     correct = 0
     total = 0
+
+    adv_stat_correct = torch.zeros([10]).cuda()
+    adv_stat_total = torch.zeros([10]).cuda()
+    adv_stat_output = torch.zeros([10, 10]).cuda()
+    adv_stat_shannon_total = torch.zeros([10]).cuda()
+
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         with ctx_noparamgrad_and_eval(net):
             adv_data = adversary.perturb(inputs,targets)
         outputs = net(adv_data)
-        loss = criterion(outputs, targets)
+
+        # for tensorboard
+        prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
+        _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
+        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
+
+        loss = criterion(outputs, targets) if args.min_loss != "SPLoss" else criterion(outputs, targets,epoch)
         loss.backward()
         optimizer.step()
 
@@ -144,21 +161,34 @@ def train(epoch):
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
+    adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
+    adv_stat_output /= adv_stat_shannon_total
+    adv_entropy = _calculate_information_entropy(adv_stat_output)
+
+    #monitor shannon - class level
+    writer.add_scalars("train_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+
+    #monitor acc - class level
+    writer.add_scalars("train_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
+
+
 
 def test(epoch):
     global best_acc
     net.eval()
-    test_loss = 0
-    pgd_loss = 0
     pgd_correct = 0
     correct = 0
     total = 0
+
+    adv_stat_correct = torch.zeros([10]).cuda()
+    adv_stat_total = torch.zeros([10]).cuda()
+    adv_stat_output = torch.zeros([10, 10]).cuda()
+    adv_stat_shannon_total = torch.zeros([10]).cuda()
+
     for batch_idx, (inputs, targets) in enumerate(testloader):
         inputs, targets = inputs.to(device), targets.to(device)
         with torch.no_grad():
             outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        test_loss += loss.item()
         total += targets.size(0)
         correct += get_correct_num(outputs,targets,args.max_loss)
 
@@ -166,12 +196,27 @@ def test(epoch):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
         with torch.no_grad():
             outputs = net(pgd_data)
-        loss = criterion(outputs, targets)
-        pgd_loss += loss.item()
         pgd_correct += get_correct_num(outputs,targets,args.max_loss)
 
-        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
-                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+        # for tensorboard
+        prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
+        _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
+        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
+
+
+        progress_bar(batch_idx, len(testloader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
+                     % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+
+    adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
+    adv_stat_output /= adv_stat_shannon_total
+    adv_entropy = _calculate_information_entropy(adv_stat_output)
+
+    #monitor shannon - class level
+    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+
+    #monitor acc - class level
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
+
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
@@ -209,17 +254,11 @@ def adjust_learning_rate(optimizer, epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-# def adjust_learning_rate(optimizer, epoch):
-#     """decrease the learning rate"""
-#     lr = args.lr
-#     if epoch >= 150:
-#         lr = args.lr * 0.1
-#     if epoch >= 250:
-#         lr = args.lr * 0.01
-#     for param_group in optimizer.param_groups:
-#         param_group['lr'] = lr
+
 
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
     train(epoch)
     test(epoch)
+
+writer.close()
