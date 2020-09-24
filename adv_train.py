@@ -61,7 +61,8 @@ net_dict = {"VGG19":VGG('VGG19'),
 
 loss_dict = {"CE":nn.CrossEntropyLoss() ,
             "CS": Cosine_Similarity_Loss(),
-            "FOCAL":Focal_Loss()
+            "FOCAL":Focal_Loss(),
+            "SPLoss":SPLoss()
 }
 
 # Data

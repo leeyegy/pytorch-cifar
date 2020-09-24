@@ -40,6 +40,7 @@ def get_correct_num(output,target,loss):
 
 class SPLoss(nn.Module):
     def __init__(self):
+        super(SPLoss,self).__init__()
         self.ce = nn.CrossEntropyLoss()
         self.N_ratio = 0.8 # {from 0.8 to 1.0}
 
@@ -54,8 +55,8 @@ class SPLoss(nn.Module):
             self.N_ratio = 1.0
 
     def _ce_loss(self,output,target):
-        log_softmax = nn.LogSoftmax()(output,target) # [batch_size,10]
-        ce_loss = - log_softmax[:,target].view(log_softmax.size()[0]) # [batch_size]
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = [- log_softmax[:,target[i]].view(log_softmax.size()[0]) for i in range(target.size()[0])] # [batch_size]
         return ce_loss
 
     def forward(self,output,target,epoch):
