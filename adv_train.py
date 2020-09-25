@@ -24,7 +24,7 @@ parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI"])
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI","Ban_Loss"])
 parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
@@ -64,7 +64,8 @@ loss_dict = {"CE":nn.CrossEntropyLoss() ,
             "CS": Cosine_Similarity_Loss(),
             "FOCAL":Focal_Loss(),
             "SPLoss":SPLoss(),
-            "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma)
+            "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma),
+            "Ban_Loss":Ban_Loss()
 }
 
 # Data
