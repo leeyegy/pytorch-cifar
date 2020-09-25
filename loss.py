@@ -165,6 +165,59 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         loss = torch.mean(penalty_loss + anchor_loss)
         return loss
 
+class Easy2hardLoss(nn.Module):
+    def __init__(self,ban_target=3):
+        super(Easy2hardLoss,self).__init__()
+        self.ban_target = ban_target
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target,epoch):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        ce_loss = self._ce_loss(output, target)
+
+        if epoch<=80:
+            # easy mode
+            if epoch % 5 != 0:
+                ce_loss[target==self.ban_target] = 0
+        else:
+            # hard mode
+            if epoch % 5 != 0 :
+                ce_loss[target!=self.ban_target] = 0
+        return  ce_loss.mean()
+
+class Ban_Loss(nn.Module):
+    def __init__(self,ban_target=3):
+        super(Ban_Loss,self).__init__()
+        self.ban_target = ban_target
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+
+        ce_loss = self._ce_loss(output, target)
+        ce_loss[target==3] = 0
+        return  ce_loss.mean()
+
 class Focal_Loss(nn.Module):
     def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine",individual=False):
         super(Focal_Loss,self).__init__()

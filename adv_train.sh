@@ -2,7 +2,7 @@ for net in ResNet18
 do 
 for max_loss in CE
 do 
-	for min_loss in FOCAL_INDI
+	for min_loss in Easy2hardLoss
 	do
 	for attack in PGD
 	do 
