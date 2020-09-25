@@ -176,8 +176,6 @@ def train(epoch):
     #monitor acc - class level
     writer.add_scalars("train_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
 
-
-
 def test(epoch):
     global best_acc
     net.eval()

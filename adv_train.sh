@@ -8,7 +8,7 @@ do
 	do 
 		for eps in 0.03137
 		do
-			for gamma in -1 
+			for gamma in -0.3 
 			do
 		    	python adv_train.py --gamma $gamma  --net $net --min_loss $min_loss --max_loss $max_loss --attack_method $attack --epsilon $eps | tee log/adv_training/$attack\_$eps\_$min_loss\_$gamma\_$max_loss\_$net.txt
 done
