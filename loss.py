@@ -43,48 +43,45 @@ class SPLoss(nn.Module):
         super(SPLoss,self).__init__()
         self.ce = nn.CrossEntropyLoss()
         self.N_ratio = 0.8 # {from 0.8 to 1.0}
+        self.q_t = 0
 
-    def _adjust_N_ratio(self,epoch):
+    def _adjust_N_ratio_q_t(self,epoch):
         if epoch<=25:
-            self.ratio = 0.7
+            self.N_ratio = 0.7
+            self.q_t = 2
         elif epoch<=75:
             self.N_ratio = 0.8
+            self.q_t = 0
         elif epoch <=95:
             self.N_ratio = 0.9
+            self.q_t = 0
         else:
             self.N_ratio = 1.0
+            self.q_t = 0
 
     def _ce_loss(self,output,target):
         log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
-        ce_loss = [- log_softmax[:,target[i]].view(log_softmax.size()[0]) for i in range(target.size()[0])] # [batch_size]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
         return ce_loss
 
     def forward(self,output,target,epoch):
         # define ratio
-        self._adjust_N_ratio(epoch)
+        self._adjust_N_ratio_q_t(epoch)
 
         # calculate CE loss
         ce_loss =self._ce_loss(output,target)
 
-        # justify
-        print(ce_loss.size())
-        print(ce_loss.mean().data)
-        print(ce_loss.sum().data)
-        print(self.ce(output,target).data)
-
         # calculate lambda_t
         ## sort ce_loss
         sorted,index = torch.sort(ce_loss,descending=False)
-        lambda_t = sorted[(target.size()[0] * self.N_ratio).int()]
-
-        # calculate q_t
-        q_t = 3 * math.tan(math.pi*0.5*(1-(target.size()[0] * self.N_ratio).int()/(target.size()[0]+1))) # original:2
-        print(q_t.data)
+        lambda_t = sorted[int(target.size()[0] * self.N_ratio)]
 
         # calculate v_t
-        v_t = (1-ce_loss/lambda_t) ** (1/(q_t-1))
-        print(v_t.size())
+        v_t = (1-ce_loss/lambda_t) ** (1/(self.q_t-1))
         v_t[ce_loss>=lambda_t]=0
+        v_t[v_t>=10] = 10
 
         # calculate loss
         loss = ce_loss * v_t
@@ -141,7 +138,7 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         return loss
 
 class Focal_Loss(nn.Module):
-    def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine"):
+    def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine",individual=False):
         super(Focal_Loss,self).__init__()
         self.s = s
         self.m = m
@@ -149,6 +146,15 @@ class Focal_Loss(nn.Module):
         self.eps = eps
         self.ce = nn.CrossEntropyLoss()
         self.mode = mode
+        self.individual = individual
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
     def forward(self,output,target):
         """
         :param input: output of model
@@ -165,9 +171,13 @@ class Focal_Loss(nn.Module):
         elif self.mode == "normal":
             # print("normal_mode")
             pass
-        logp = self.ce(output,target)
-        p = torch.exp(-logp)
-        loss = (1-p) ** self.gamma * logp
+        if not self.individual:
+            logp = self.ce(output,target)
+            p = torch.exp(-logp)
+            loss = (1-p) ** self.gamma * logp
+        else:
+            ce_loss = self._ce_loss(output, target)
+
         return  loss.mean()
 
 
