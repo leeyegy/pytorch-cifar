@@ -46,7 +46,8 @@ net_dict = {"VGG19":VGG('VGG19'),
             "SENet18":SENet18(),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
-            "RegNetX_200MF":RegNetX_200MF()
+            "RegNetX_200MF":RegNetX_200MF(),
+            "ResNet18_dbn":ResNet18_dbn()
 }
 
 # Data
