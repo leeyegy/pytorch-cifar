@@ -24,21 +24,22 @@ parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss"])
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI"])
 parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
+parser.add_argument("--gamma",type=float,default=2.0)
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+save_path = os.path.join("checkpoint",args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else  os.path.join("checkpoint",args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
 # define tensorboard
-exp_name = os.path.join("runs", args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+exp_name = os.path.join("runs", args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else os.path.join("runs", args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
 writer = SummaryWriter(exp_name)
 
 # model dict
@@ -62,7 +63,8 @@ net_dict = {"VGG19":VGG('VGG19'),
 loss_dict = {"CE":nn.CrossEntropyLoss() ,
             "CS": Cosine_Similarity_Loss(),
             "FOCAL":Focal_Loss(),
-            "SPLoss":SPLoss()
+            "SPLoss":SPLoss(),
+            "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma)
 }
 
 # Data
@@ -80,12 +82,12 @@ transform_test = transforms.Compose([
 ])
 
 trainset = torchvision.datasets.CIFAR10(
-    root='/home/liyanjie/.torch/datasets', train=True, download=True, transform=transform_train)
+    root='/home/Leeyegy/.torch/datasets', train=True, download=True, transform=transform_train)
 trainloader = torch.utils.data.DataLoader(
     trainset, batch_size=128, shuffle=True, num_workers=2)
 
 testset = torchvision.datasets.CIFAR10(
-    root='/home/liyanjie/.torch/datasets', train=False, download=True, transform=transform_test)
+    root='/home/Leeyegy/.torch/datasets', train=False, download=True, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
     testset, batch_size=100, shuffle=False, num_workers=2)
 

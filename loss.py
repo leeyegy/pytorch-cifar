@@ -82,6 +82,9 @@ class SPLoss(nn.Module):
         v_t = (1-ce_loss/lambda_t) ** (1/(self.q_t-1))
         v_t[ce_loss>=lambda_t]=0
         v_t[v_t>=10] = 10
+        # print(v_t.data)
+        # print(torch.max(v_t))
+        # print(torch.min(v_t))
 
         # calculate loss
         loss = ce_loss * v_t
@@ -177,7 +180,8 @@ class Focal_Loss(nn.Module):
             loss = (1-p) ** self.gamma * logp
         else:
             ce_loss = self._ce_loss(output, target)
-
+            p = torch.exp(-ce_loss)
+            loss = (1-p) ** self.gamma * ce_loss
         return  loss.mean()
 
 
