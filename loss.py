@@ -38,6 +38,31 @@ def get_correct_num(output,target,loss):
         _, predicted = output.max(1)
         return predicted.eq(target).sum().item()
 
+
+class ReviewLoss(nn.Module):
+    def __init__(self,review_ratio):
+        super(ReviewLoss, self).__init__()
+        self.review_ratio = review_ratio
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target):
+        # calculate CE loss
+        ce_loss =self._ce_loss(output,target)
+
+        # calculate lambda_t
+        ## sort ce_loss
+        sorted,index = torch.sort(ce_loss,descending=True)
+        lambda_t = sorted[int(target.size()[0] * self.review_ratio)]
+
+        ce_loss[ce_loss<lambda_t] = 0
+        return ce_loss.mean()
+
 class SPLoss(nn.Module):
     def __init__(self):
         super(SPLoss,self).__init__()
