@@ -266,6 +266,28 @@ class Ban_Loss(nn.Module):
         ce_loss[target==3] = 0
         return  ce_loss.mean()
 
+class BalanceLoss(nn.Module):
+    def __init__(self,pick_up=3):
+        super(BalanceLoss,self).__init__()
+        self.pick_up = pick_up
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        ce_loss = self._ce_loss(output, target)
+        ce_loss[target==self.pick_up] *= 9
+        return  loss.mean()
+
 class Focal_Loss(nn.Module):
     def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine",individual=False):
         super(Focal_Loss,self).__init__()
