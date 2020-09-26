@@ -111,15 +111,16 @@ if device == 'cuda':
 
 if args.resume:
     # Load checkpoint.
-    print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
     checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
+    print('==> Resuming from checkpoint {}'.format(start_epoch))
+
 
 #define adversary
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=0.06275,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
@@ -231,6 +232,6 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
-    train(args, net, device, train_loader, optimizer, epoch)
+    # train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
     writer.close()

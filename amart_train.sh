@@ -1,1 +1,1 @@
-python amart_train.py --epsilon 0.03137
+python amart_train.py --resume --epsilon 0.03137
