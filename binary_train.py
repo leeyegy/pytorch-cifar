@@ -18,6 +18,8 @@ from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
 from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
+import random
+import numpy as np
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -55,7 +57,7 @@ loss_dict = {"CE":nn.CrossEntropyLoss() ,
             "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma),
             "Ban_Loss":Ban_Loss(),
             "Easy2hardLoss" : Easy2hardLoss(),
-            "BalanceLoss":BalanceLoss(pick_up=args.pick_up)
+            "BalanceLoss":BalanceLoss()
 }
 
 # Data
@@ -64,12 +66,10 @@ transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 transform_test = transforms.Compose([
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 trainset = torchvision.datasets.CIFAR10(
@@ -118,6 +118,29 @@ elif args.attack_method == "PGD":
     adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 
+
+def rebalance_data(inputs,targets):
+    amount_to_select = (targets==1).sum()
+    data_to_select = inputs[targets==0]
+    index_list = range(0,data_to_select.size()[0])
+    index_selected = np.random.permutation(index_list)[0:amount_to_select]
+    data_selected = data_to_select[index_selected]
+
+    data = torch.zeros([amount_to_select*2,inputs.size()[1],inputs.size()[2],inputs.size()[3]]).to(inputs)
+    target = targets.clone().detach()
+
+    data[0:amount_to_select] = inputs[targets==1]
+    target[0:amount_to_select] = 1
+    data[amount_to_select:2*amount_to_select] = data_selected
+    target[amount_to_select:2*amount_to_select] = 0
+
+    shuffle_index_list = range(0,amount_to_select*2)
+    data = data[shuffle_index_list]
+    target = target[shuffle_index_list]
+
+    return data.cuda(),target.cuda()
+
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -136,6 +159,9 @@ def train(epoch):
         targets = targets_ori.clone().detach()
         targets[targets_ori==args.pick_up] = 1
         targets[targets_ori!=args.pick_up] = 0
+
+        inputs,targets = rebalance_data(inputs,targets)
+
 
         optimizer.zero_grad()
         with ctx_noparamgrad_and_eval(net):

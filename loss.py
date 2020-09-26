@@ -266,10 +266,10 @@ class Ban_Loss(nn.Module):
         ce_loss[target==3] = 0
         return  ce_loss.mean()
 
+# only for binary classifier
 class BalanceLoss(nn.Module):
-    def __init__(self,pick_up=3):
+    def __init__(self):
         super(BalanceLoss,self).__init__()
-        self.pick_up = pick_up
 
     def _ce_loss(self,output,target):
         log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
@@ -285,8 +285,10 @@ class BalanceLoss(nn.Module):
         :return: loss value
         """
         ce_loss = self._ce_loss(output, target)
-        ce_loss[target==self.pick_up] *= 9
-        return  loss.mean()
+        # print(ce_loss[target==1].data)
+        ce_loss[target==1] *= 9
+        # print(ce_loss[target==1].data)
+        return  ce_loss.mean()
 
 class Focal_Loss(nn.Module):
     def __init__(self,s=64.0,m=0.35,gamma=2,eps=1e-7,mode="cosine",individual=False):
