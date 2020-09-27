@@ -48,6 +48,7 @@ writer = SummaryWriter(exp_name)
 # model dict
 net_dict = {
             "ResNet18": ResNet18(num_classes=2),
+            "LeNet":LeNet(num_classes=2),
 }
 
 loss_dict = {"CE":nn.CrossEntropyLoss() ,
@@ -80,7 +81,7 @@ trainloader = torch.utils.data.DataLoader(
 testset = torchvision.datasets.CIFAR10(
     root='/home/Leeyegy/.torch/datasets', train=False, download=True, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
-    testset, batch_size=100, shuffle=False, num_workers=2)
+    testset, batch_size=128, shuffle=False, num_workers=2)
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer',
            'dog', 'frog', 'horse', 'ship', 'truck')
@@ -160,13 +161,14 @@ def train(epoch):
         targets[targets_ori==args.pick_up] = 1
         targets[targets_ori!=args.pick_up] = 0
 
-        inputs,targets = rebalance_data(inputs,targets)
+        # inputs,targets = rebalance_data(inputs,targets)
 
 
         optimizer.zero_grad()
-        with ctx_noparamgrad_and_eval(net):
-            adv_data = adversary.perturb(inputs,targets)
-        outputs = net(adv_data)
+        # with ctx_noparamgrad_and_eval(net):
+        #     adv_data = adversary.perturb(inputs,targets)
+        # outputs = net(adv_data)
+        outputs = net(inputs)
 
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)

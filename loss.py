@@ -53,7 +53,7 @@ def advanced_mart_loss(model,
 
     adv_probs = F.softmax(logits_adv, dim=1)
     tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
-    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1]) # misclassified max prob label
 
     loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
     nat_probs = F.softmax(logits, dim=1)
@@ -265,6 +265,38 @@ class Ban_Loss(nn.Module):
         ce_loss = self._ce_loss(output, target)
         ce_loss[target==3] = 0
         return  ce_loss.mean()
+
+# class KingLoss(nn.Module):
+#     def __init__(self,king=3,beta=1):
+#         super(KingLoss,self).__init__()
+#         self.king = king
+#         self.beta = beta
+#         self.ce = nn.CrossEntropyLoss()
+#
+#     def _ce_loss(self,output,target):
+#         log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+#         ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+#         for i in range(target.size()[0]):
+#             ce_loss[i] = - log_softmax[i, target[i]]
+#         return ce_loss
+#
+#
+#     def forward(self,output,target,epoch):
+#         """
+#         :param output: output of model [N,10]
+#         :param target: hard ground truth label
+#         :return: loss value
+#         """
+#         ce_loss = self._ce_loss(output, target)
+#         # easy mode
+#         if epoch % 5 != 0:
+#             ce_loss[target!=self.king] = 0
+#         else:
+#             softmax_output = F.softmax(output,dim=1)
+#             for i in range(target.size()[0]):
+#                 if target[i] != self.king:
+#                    ce_loss[i] += softmax_output[i,self.king]
+#         return  ce_loss.mean()
 
 # only for binary classifier
 class BalanceLoss(nn.Module):

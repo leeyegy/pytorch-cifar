@@ -29,6 +29,12 @@ def _calculate_information_entropy(input):
             ans[i] += -input[i,k] * log(input[i,k],2)
     return ans
 
+def _analyze_misclassified_as_king(adv_misclassified_as_king,prediction,targets,king):
+    mask_1 = (prediction == king)
+    mask_2 = targets!=king
+    # print((mask_1 * mask_2).data)
+    adv_misclassified_as_king += (mask_1 * mask_2).sum()
+
 def analyze_infomation_entropy_class_level(model):
     model.eval()
     # adversary

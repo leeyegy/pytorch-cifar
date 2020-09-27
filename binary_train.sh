@@ -1,8 +1,8 @@
-for net in ResNet18
+for net in LeNet
 do 
 for max_loss in CE
 do 
-	for min_loss in CE
+	for min_loss in BalanceLoss
 	do
 	for attack in PGD
 	do 

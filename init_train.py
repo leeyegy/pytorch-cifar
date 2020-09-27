@@ -24,24 +24,22 @@ parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI","Ban_Loss","Easy2hardLoss","KingLoss"])
-parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
-parser.add_argument("--attack_method",type=str,default="FGSM")
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE"])
+parser.add_argument("--max_loss",type=str,default="CE",choices=["CE"])
+parser.add_argument("--attack_method",type=str,default="PGD")
 parser.add_argument("--epsilon",type=float,default=0.03137)
-parser.add_argument("--gamma",type=float,default=2.0)
-parser.add_argument("--pick_up",type=int,default=2)
-
+parser.add_argument("--init",type=str)
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",str(args.pick_up)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else  os.path.join("checkpoint",args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
+save_path = os.path.join("checkpoint","init_"+str(args.lr)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net)
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
 # define tensorboard
-exp_name = os.path.join("runs", str(args.pick_up)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else os.path.join("runs", args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
+exp_name = os.path.join("runs", "init_"+str(args.lr)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net)
 writer = SummaryWriter(exp_name)
 
 # model dict
@@ -63,13 +61,6 @@ net_dict = {"VGG19":VGG('VGG19'),
 }
 
 loss_dict = {"CE":nn.CrossEntropyLoss() ,
-            "CS": Cosine_Similarity_Loss(),
-            "FOCAL":Focal_Loss(),
-            "SPLoss":SPLoss(),
-            "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma),
-            "Ban_Loss":Ban_Loss(),
-            "Easy2hardLoss" : Easy2hardLoss(),
-            "KingLoss":KingLoss(king=args.pick_up)
 }
 
 # Data
@@ -78,12 +69,10 @@ transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 transform_test = transforms.Compose([
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 trainset = torchvision.datasets.CIFAR10(
@@ -106,6 +95,13 @@ net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
+# try init first and then resume
+if args.init:
+    # Load checkpoint.
+    print('==> Resuming from init:{}'.format(args.init))
+    checkpoint = torch.load(os.path.join(args.init))
+    net.load_state_dict(checkpoint['net'])
+    print("cln best acc:{}".format(checkpoint['acc']))
 
 if args.resume:
     # Load checkpoint.
@@ -123,7 +119,6 @@ if args.net != "ResNet18_cosine":
 adversary_loss = loss_dict[args.max_loss]
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
-
 
 #define adversary
 if args.attack_method == "FGSM":
@@ -144,7 +139,6 @@ def train(epoch):
     adv_stat_total = torch.zeros([10]).cuda()
     adv_stat_output = torch.zeros([10, 10]).cuda()
     adv_stat_shannon_total = torch.zeros([10]).cuda()
-    adv_misclassified_as_king = torch.zeros([1]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -157,7 +151,6 @@ def train(epoch):
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
-        _analyze_misclassified_as_king(adv_misclassified_as_king,prediction,targets,args.pick_up)
 
         loss = criterion(outputs, targets) if args.min_loss != "SPLoss" and args.min_loss !="Easy2hardLoss"  and args.min_loss != "KingLoss" else criterion(outputs, targets,epoch)
         loss.backward()
@@ -181,8 +174,6 @@ def train(epoch):
     #monitor acc - class level
     writer.add_scalars("train_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
 
-    # monitor misclassified as king
-    writer.add_scalar("train_adv_misclassied_as_{}".format(args.pick_up),adv_misclassified_as_king,epoch)
 def test(epoch):
     global best_acc
     net.eval()
@@ -194,7 +185,6 @@ def test(epoch):
     adv_stat_total = torch.zeros([10]).cuda()
     adv_stat_output = torch.zeros([10, 10]).cuda()
     adv_stat_shannon_total = torch.zeros([10]).cuda()
-    adv_misclassified_as_king = torch.zeros([1]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(testloader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -213,7 +203,6 @@ def test(epoch):
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
-        _analyze_misclassified_as_king(adv_misclassified_as_king,prediction,targets,args.pick_up)
 
 
         progress_bar(batch_idx, len(testloader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
@@ -228,9 +217,6 @@ def test(epoch):
 
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
-
-    # monitor misclassified as king
-    writer.add_scalar("test_adv_misclassied_as_{}".format(args.pick_up),adv_misclassified_as_king,epoch)
 
     # Save checkpoint.
     acc = 100.*pgd_correct/total

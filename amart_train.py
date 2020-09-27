@@ -18,6 +18,8 @@ from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
 from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
+from autoattack import AutoAttack
+
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR MART Defense')
@@ -50,6 +52,8 @@ parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
+
+parser.add_argument("--init",type=str)
 args = parser.parse_args()
 
 
@@ -60,11 +64,17 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","amart_"+args.net)
+if args.init:
+    save_path = os.path.join("checkpoint", "amart_init_" + args.net)
+    exp_name = os.path.join("runs", "amart_init_"+args.net)
+
+else:
+    save_path = os.path.join("checkpoint","amart_"+args.net,"beta_"+str(args.beta))
+    exp_name = os.path.join("runs", "amart_"+args.net,"beta_"+str(args.beta))
+
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 # define tensorboard
-exp_name = os.path.join("runs", "amart_"+args.net)
 writer = SummaryWriter(exp_name)
 
 # model dict
@@ -109,6 +119,13 @@ test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_si
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
 
+if args.init:
+    # Load checkpoint.
+    print('==> Resuming from init:{}'.format(args.init))
+    checkpoint = torch.load(os.path.join(args.init))
+    net.load_state_dict(checkpoint['net'])
+    print("cln best acc:{}".format(checkpoint['acc']))
+
 if args.resume:
     # Load checkpoint.
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
@@ -120,7 +137,8 @@ if args.resume:
 
 
 #define adversary
-PGD_adversary = LinfPGDAttack(net,eps=0.06275,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+# AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
@@ -168,6 +186,8 @@ def test(epoch):
 
         with ctx_noparamgrad_and_eval(net):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
+        # pgd_data = AA_adversary.run_standard_evaluation(inputs, targets, bs=args.test_batch_size)
+
         with torch.no_grad():
             outputs = net(pgd_data)
         pgd_correct += get_correct_num(outputs,targets,"CE")
@@ -232,6 +252,7 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
-    # train(args, net, device, train_loader, optimizer, epoch)
+    train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
+    # break
     writer.close()
