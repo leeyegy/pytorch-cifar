@@ -146,8 +146,8 @@ class ResNet(nn.Module):
 def ResNet18_cosine():
     return ResNet_cosine(BasicBlock, [2, 2, 2, 2])
 
-def ResNet18():
-    return ResNet(BasicBlock, [2, 2, 2, 2])
+def ResNet18(num_classes=10):
+    return ResNet(BasicBlock, [2, 2, 2, 2],num_classes=num_classes)
 
 
 def ResNet34():

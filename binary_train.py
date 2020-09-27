@@ -17,50 +17,38 @@ from loss import *
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
-from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy,_analyze_misclassified_as_king
+from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
+import random
+import numpy as np
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
-
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI","Ban_Loss","Easy2hardLoss","KingLoss"])
+parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL","SPLoss","FOCAL_INDI","Ban_Loss","Easy2hardLoss","BalanceLoss"])
 parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
 parser.add_argument("--attack_method",type=str,default="FGSM")
 parser.add_argument("--epsilon",type=float,default=0.03137)
 parser.add_argument("--gamma",type=float,default=2.0)
-parser.add_argument("--pick_up",type=int,default=2)
-
+parser.add_argument("--pick_up",type=int,default=0)
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",str(args.pick_up)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else  os.path.join("checkpoint",args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
+save_path = os.path.join("checkpoint","binary",args.min_loss+"_"+args.max_loss+"_"+args.net,str(args.pick_up)) if args.min_loss != "FOCAL_INDI" else  os.path.join("checkpoint","binary",args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net,str(args.pick_up))
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
 # define tensorboard
-exp_name = os.path.join("runs", str(args.pick_up)+"_"+args.min_loss+"_"+args.max_loss+"_"+args.net) if args.min_loss != "FOCAL_INDI" else os.path.join("runs", args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net)
+exp_name = os.path.join("runs", "binary",args.min_loss+"_"+args.max_loss+"_"+args.net,str(args.pick_up)) if args.min_loss != "FOCAL_INDI" else os.path.join("runs", "binary",args.min_loss+"_"+str(args.gamma)+"_"+args.max_loss+"_"+args.net,str(args.pick_up))
 writer = SummaryWriter(exp_name)
 
 # model dict
-net_dict = {"VGG19":VGG('VGG19'),
-            "ResNet18": ResNet18(),
-            "ResNet18_cosine":ResNet18_cosine(),
-            "PreActResNet18": PreActResNet18(),
-            "GoogLeNet":GoogLeNet(),
-            "DenseNet121":DenseNet121(),
-            "ResNeXt29_2x64d":ResNeXt29_2x64d(),
-            "MobileNet":MobileNet(),
-            "MobileNetV2":MobileNetV2(),
-            "DPN92": DPN92(),
-            # "ShuffleNetG2":ShuffleNetG2(),
-            "SENet18":SENet18(),
-            "ShuffleNetV2":ShuffleNetV2(1),
-            "EfficientNetB0":EfficientNetB0(),
-            "RegNetX_200MF":RegNetX_200MF()
+net_dict = {
+            "ResNet18": ResNet18(num_classes=2),
+            "LeNet":LeNet(num_classes=2),
 }
 
 loss_dict = {"CE":nn.CrossEntropyLoss() ,
@@ -70,7 +58,7 @@ loss_dict = {"CE":nn.CrossEntropyLoss() ,
             "FOCAL_INDI":Focal_Loss(individual=True,gamma=args.gamma),
             "Ban_Loss":Ban_Loss(),
             "Easy2hardLoss" : Easy2hardLoss(),
-            "KingLoss":KingLoss(king=args.pick_up)
+            "BalanceLoss":BalanceLoss()
 }
 
 # Data
@@ -79,12 +67,10 @@ transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 transform_test = transforms.Compose([
     transforms.ToTensor(),
-    # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
 trainset = torchvision.datasets.CIFAR10(
@@ -95,7 +81,7 @@ trainloader = torch.utils.data.DataLoader(
 testset = torchvision.datasets.CIFAR10(
     root='/home/Leeyegy/.torch/datasets', train=False, download=True, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
-    testset, batch_size=100, shuffle=False, num_workers=2)
+    testset, batch_size=128, shuffle=False, num_workers=2)
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer',
            'dog', 'frog', 'horse', 'ship', 'truck')
@@ -133,6 +119,29 @@ elif args.attack_method == "PGD":
     adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
 
+
+def rebalance_data(inputs,targets):
+    amount_to_select = (targets==1).sum()
+    data_to_select = inputs[targets==0]
+    index_list = range(0,data_to_select.size()[0])
+    index_selected = np.random.permutation(index_list)[0:amount_to_select]
+    data_selected = data_to_select[index_selected]
+
+    data = torch.zeros([amount_to_select*2,inputs.size()[1],inputs.size()[2],inputs.size()[3]]).to(inputs)
+    target = targets.clone().detach()
+
+    data[0:amount_to_select] = inputs[targets==1]
+    target[0:amount_to_select] = 1
+    data[amount_to_select:2*amount_to_select] = data_selected
+    target[amount_to_select:2*amount_to_select] = 0
+
+    shuffle_index_list = range(0,amount_to_select*2)
+    data = data[shuffle_index_list]
+    target = target[shuffle_index_list]
+
+    return data.cuda(),target.cuda()
+
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -141,26 +150,32 @@ def train(epoch):
     correct = 0
     total = 0
 
-    adv_stat_correct = torch.zeros([10]).cuda()
-    adv_stat_total = torch.zeros([10]).cuda()
-    adv_stat_output = torch.zeros([10, 10]).cuda()
-    adv_stat_shannon_total = torch.zeros([10]).cuda()
-    adv_misclassified_as_king = torch.zeros([1]).cuda()
+    adv_stat_correct = torch.zeros([2]).cuda()
+    adv_stat_total = torch.zeros([2]).cuda()
+    adv_stat_output = torch.zeros([2, 2]).cuda()
+    adv_stat_shannon_total = torch.zeros([2]).cuda()
 
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch_idx, (inputs, targets_ori) in enumerate(trainloader):
+        inputs, targets_ori = inputs.to(device), targets_ori.to(device)
+        targets = targets_ori.clone().detach()
+        targets[targets_ori==args.pick_up] = 1
+        targets[targets_ori!=args.pick_up] = 0
+
+        # inputs,targets = rebalance_data(inputs,targets)
+
+
         optimizer.zero_grad()
-        with ctx_noparamgrad_and_eval(net):
-            adv_data = adversary.perturb(inputs,targets)
-        outputs = net(adv_data)
+        # with ctx_noparamgrad_and_eval(net):
+        #     adv_data = adversary.perturb(inputs,targets)
+        # outputs = net(adv_data)
+        outputs = net(inputs)
 
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
-        _analyze_misclassified_as_king(adv_misclassified_as_king,prediction,targets,args.pick_up)
 
-        loss = criterion(outputs, targets) if args.min_loss != "SPLoss" and args.min_loss !="Easy2hardLoss"  and args.min_loss != "KingLoss" else criterion(outputs, targets,epoch)
+        loss = criterion(outputs, targets) if args.min_loss != "SPLoss" and args.min_loss !="Easy2hardLoss" else criterion(outputs, targets,epoch)
         loss.backward()
         optimizer.step()
 
@@ -177,13 +192,11 @@ def train(epoch):
     adv_entropy = _calculate_information_entropy(adv_stat_output)
 
     #monitor shannon - class level
-    writer.add_scalars("train_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+    writer.add_scalars("train_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(2)},epoch)
 
     #monitor acc - class level
-    writer.add_scalars("train_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
+    writer.add_scalars("train_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(2)},epoch)
 
-    # monitor misclassified as king
-    writer.add_scalar("train_adv_misclassied_as_{}".format(args.pick_up),adv_misclassified_as_king,epoch)
 def test(epoch):
     global best_acc
     net.eval()
@@ -191,14 +204,17 @@ def test(epoch):
     correct = 0
     total = 0
 
-    adv_stat_correct = torch.zeros([10]).cuda()
-    adv_stat_total = torch.zeros([10]).cuda()
-    adv_stat_output = torch.zeros([10, 10]).cuda()
-    adv_stat_shannon_total = torch.zeros([10]).cuda()
-    adv_misclassified_as_king = torch.zeros([1]).cuda()
+    adv_stat_correct = torch.zeros([2]).cuda()
+    adv_stat_total = torch.zeros([2]).cuda()
+    adv_stat_output = torch.zeros([2, 2]).cuda()
+    adv_stat_shannon_total = torch.zeros([2]).cuda()
 
-    for batch_idx, (inputs, targets) in enumerate(testloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch_idx, (inputs, targets_ori) in enumerate(testloader):
+        inputs, targets_ori = inputs.to(device), targets_ori.to(device)
+        targets = targets_ori.clone().detach()
+        targets[targets_ori==args.pick_up] = 1
+        targets[targets_ori!=args.pick_up] = 0
+
         with torch.no_grad():
             outputs = net(inputs)
         total += targets.size(0)
@@ -214,7 +230,6 @@ def test(epoch):
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
-        _analyze_misclassified_as_king(adv_misclassified_as_king,prediction,targets,args.pick_up)
 
 
         progress_bar(batch_idx, len(testloader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
@@ -225,13 +240,10 @@ def test(epoch):
     adv_entropy = _calculate_information_entropy(adv_stat_output)
 
     #monitor shannon - class level
-    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(2)},epoch)
 
     #monitor acc - class level
-    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
-
-    # monitor misclassified as king
-    writer.add_scalar("test_adv_misclassied_as_{}".format(args.pick_up),adv_misclassified_as_king,epoch)
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(2)},epoch)
 
     # Save checkpoint.
     acc = 100.*pgd_correct/total
@@ -276,5 +288,4 @@ for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
     train(epoch)
     test(epoch)
-
 writer.close()

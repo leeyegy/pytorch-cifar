@@ -17,6 +17,54 @@ target_map = {"0":torch.from_numpy(np.asarray([0,0.333,0.333,0.333,0.333,0.333,0
        "9":torch.from_numpy(np.asarray([0,-0.707,5.103e-16,1.178e-15,1.963e-16,-1.57e-16,3.140e-16,-3.925e-17,-2.355e-16,0.707]))}
 
 
+def advanced_mart_loss(model,
+              x_natural,
+              y,
+              optimizer,
+              step_size=0.007,
+              epsilon=0.031,
+              perturb_steps=10,
+              beta=6.0,
+              distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+    # generate adversarial example
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    logits = model(x_natural)
+    logits_adv = model(x_adv)
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1]) # misclassified max prob label
+
+    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    nat_probs = F.softmax(logits, dim=1)
+    true_adv_probs = torch.gather(adv_probs, 1, (y.unsqueeze(1)).long()).squeeze()
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_adv_probs))
+    loss = loss_adv + float(beta) * loss_robust
+
+    return loss
+
 def get_correct_num(output,target,loss):
     """
     :param output: [N,10] | cuda tensor
@@ -165,6 +213,37 @@ class Margin_Cosine_Similarity_Loss(nn.Module):
         loss = torch.mean(penalty_loss + anchor_loss)
         return loss
 
+
+class Easy2hardLoss(nn.Module):
+    def __init__(self,ban_target=3):
+        super(Easy2hardLoss,self).__init__()
+        self.ban_target = ban_target
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target,epoch):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        ce_loss = self._ce_loss(output, target)
+
+        if epoch<=80:
+            # easy mode
+            if epoch % 5 != 0:
+                ce_loss[target==self.ban_target] = 0
+        else:
+            # hard mode
+            if epoch % 5 != 0 :
+                ce_loss[target!=self.ban_target] = 0
+        return  ce_loss.mean()
+
 class Ban_Loss(nn.Module):
     def __init__(self,ban_target=3):
         super(Ban_Loss,self).__init__()
@@ -186,6 +265,62 @@ class Ban_Loss(nn.Module):
 
         ce_loss = self._ce_loss(output, target)
         ce_loss[target==3] = 0
+        return  ce_loss.mean()
+
+# class KingLoss(nn.Module):
+#     def __init__(self,king=3,beta=1):
+#         super(KingLoss,self).__init__()
+#         self.king = king
+#         self.beta = beta
+#         self.ce = nn.CrossEntropyLoss()
+#
+#     def _ce_loss(self,output,target):
+#         log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+#         ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+#         for i in range(target.size()[0]):
+#             ce_loss[i] = - log_softmax[i, target[i]]
+#         return ce_loss
+#
+#
+#     def forward(self,output,target,epoch):
+#         """
+#         :param output: output of model [N,10]
+#         :param target: hard ground truth label
+#         :return: loss value
+#         """
+#         ce_loss = self._ce_loss(output, target)
+#         # easy mode
+#         if epoch % 5 != 0:
+#             ce_loss[target!=self.king] = 0
+#         else:
+#             softmax_output = F.softmax(output,dim=1)
+#             for i in range(target.size()[0]):
+#                 if target[i] != self.king:
+#                    ce_loss[i] += softmax_output[i,self.king]
+#         return  ce_loss.mean()
+
+# only for binary classifier
+class BalanceLoss(nn.Module):
+    def __init__(self):
+        super(BalanceLoss,self).__init__()
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+    def forward(self,output,target):
+        """
+        :param input: output of model
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        ce_loss = self._ce_loss(output, target)
+        # print(ce_loss[target==1].data)
+        ce_loss[target==1] *= 9
+        # print(ce_loss[target==1].data)
         return  ce_loss.mean()
 
 class Focal_Loss(nn.Module):
