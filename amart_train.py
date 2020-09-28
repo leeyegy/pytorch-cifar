@@ -48,7 +48,9 @@ parser.add_argument('--beta', default=5.0,
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument("--net",default="ResNet18",type=str)
-parser.add_argument('--resume', '-r', action='store_true',
+parser.add_argument('--resume_best', '-r', action='store_true',
+                    help='resume from checkpoint')
+parser.add_argument('--resume_last', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
@@ -92,7 +94,8 @@ net_dict = {"VGG19":VGG('VGG19'),
             "SENet18":SENet18(),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
-            "RegNetX_200MF":RegNetX_200MF()
+            "RegNetX_200MF":RegNetX_200MF(),
+            "WideResNet":WideResNet()
 }
 
 # Model
@@ -126,7 +129,8 @@ if args.init:
     net.load_state_dict(checkpoint['net'])
     print("cln best acc:{}".format(checkpoint['acc']))
 
-if args.resume:
+assert not (args.resume_best and args.resume_last)
+if args.resume_best:
     # Load checkpoint.
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
     checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
@@ -135,9 +139,18 @@ if args.resume:
     start_epoch = checkpoint['epoch']
     print('==> Resuming from checkpoint {}'.format(start_epoch))
 
+if args.resume_last:
+    # Load checkpoint.
+    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load(os.path.join(save_path,'ckpt_last.pth'))
+    net.load_state_dict(checkpoint['net'])
+    best_acc = checkpoint['acc']
+    start_epoch = checkpoint['epoch']
+    print('==> Resuming from checkpoint {}'.format(start_epoch))
 
 #define adversary
-PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+# PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -252,7 +265,7 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
-    train(args, net, device, train_loader, optimizer, epoch)
+    # train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    # break
+    break
     writer.close()
