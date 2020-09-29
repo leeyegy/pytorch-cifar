@@ -1,8 +1,8 @@
-for beta in 3
+for beta in 5
 do
 	for net in ResNet18
 	do
-		for loss in amart-i
+		for loss in amart-w
 		do
 			for gamma in 1.0
 			do

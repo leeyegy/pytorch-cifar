@@ -21,7 +21,6 @@ from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_
 from autoattack import AutoAttack
 
 
-
 parser = argparse.ArgumentParser(description='PyTorch CIFAR MART Defense')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -72,9 +71,9 @@ if args.init:
     exp_name = os.path.join("runs", "amart_init_"+args.net)
 
 else:
-    save_path = os.path.join("checkpoint","amart_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
+    save_path = os.path.join("checkpoint","amart_"+args.net,args.loss+"_beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
     # save_path = os.path.join("checkpoint","amart_"+args.loss+args.net,"beta_"+str(args.beta))
-    exp_name = os.path.join("runs", "amart_"+args.loss+"_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
+    exp_name = os.path.join("runs", "amart_"+args.loss+"_"+args.net,args.loss+"_beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -104,12 +103,12 @@ net_dict = {"VGG19":VGG('VGG19'),
 print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
-
 # loss dict
 loss_dict = {"akl":advanced_kl_loss,
              "amart":advanced_mart_loss,
              "atrades":advanced_trades_loss,
              "amart-i":advanced_mart_inverse_loss,
+             "amart-w":advanced_mart_whole_loss,
              }
 criterion = loss_dict[args.loss]
 
