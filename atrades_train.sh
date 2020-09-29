@@ -1,4 +1,4 @@
-for gamma in 1.0
+for gamma in 0.5
 do
 	for net in ResNet18
 	do

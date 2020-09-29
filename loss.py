@@ -439,11 +439,10 @@ def get_correct_num(output,target,loss):
     """
     if loss == "CS":
         output_ = torch.sqrt(torch.sum(output * output, dim=1))
-        output = output / output_ # normalization
         score = torch.FloatTensor(output.size()).to(output)
         for k in range(output.size()[0]):
             for i in range(10):
-                score[k,i]=(target_map[str(i)].cuda().float()*output[k]).sum()
+                score[k,i]=torch.sum(target_map[str(i)].cuda().float()*output[k]) / (1*output_[i])
         pred = score.max(1,keepdim=True)[1]
         return pred.eq(target.view_as(pred)).sum().item()
 
@@ -633,37 +632,37 @@ class Ban_Loss(nn.Module):
         ce_loss[target==3] = 0
         return  ce_loss.mean()
 
-# class KingLoss(nn.Module):
-#     def __init__(self,king=3,beta=1):
-#         super(KingLoss,self).__init__()
-#         self.king = king
-#         self.beta = beta
-#         self.ce = nn.CrossEntropyLoss()
-#
-#     def _ce_loss(self,output,target):
-#         log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
-#         ce_loss = torch.ones(log_softmax.size()[0]).cuda()
-#         for i in range(target.size()[0]):
-#             ce_loss[i] = - log_softmax[i, target[i]]
-#         return ce_loss
-#
-#
-#     def forward(self,output,target,epoch):
-#         """
-#         :param output: output of model [N,10]
-#         :param target: hard ground truth label
-#         :return: loss value
-#         """
-#         ce_loss = self._ce_loss(output, target)
-#         # easy mode
-#         if epoch % 5 != 0:
-#             ce_loss[target!=self.king] = 0
-#         else:
-#             softmax_output = F.softmax(output,dim=1)
-#             for i in range(target.size()[0]):
-#                 if target[i] != self.king:
-#                    ce_loss[i] += softmax_output[i,self.king]
-#         return  ce_loss.mean()
+class KingLoss(nn.Module):
+    def __init__(self,king=3,beta=1):
+        super(KingLoss,self).__init__()
+        self.king = king
+        self.beta = beta
+        self.ce = nn.CrossEntropyLoss()
+
+    def _ce_loss(self,output,target):
+        log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+        ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+        for i in range(target.size()[0]):
+            ce_loss[i] = - log_softmax[i, target[i]]
+        return ce_loss
+
+
+    def forward(self,output,target,epoch):
+        """
+        :param output: output of model [N,10]
+        :param target: hard ground truth label
+        :return: loss value
+        """
+        ce_loss = self._ce_loss(output, target)
+        # easy mode
+        if epoch % 5 != 0:
+            ce_loss[target!=self.king] = 0
+        else:
+            softmax_output = F.softmax(output,dim=1)
+            for i in range(target.size()[0]):
+                if target[i] != self.king:
+                   ce_loss[i] += softmax_output[i,self.king]
+        return  ce_loss.mean()
 
 # only for binary classifier
 class BalanceLoss(nn.Module):
@@ -733,6 +732,30 @@ class Focal_Loss(nn.Module):
             loss = (1-p) ** self.gamma * ce_loss
         return  loss.mean()
 
+class RBFLoss(nn.Module):
+    def __init__(self,gamma=1.0):
+        super(RBFLoss,self).__init__()
+        self.gamma = gamma
+    def forward(self,x1,target):
+        """
+        :param x1: output of model
+        :param target: hard ground truth label
+        :return: loss value: [0,1]
+        """
+        # map hard-label 'target' into soft-label
+        x2 = torch.DoubleTensor(x1.size()).to(x1)
+        for i in range(x2.size()[0]):
+            x2[i] = target_map[str(target[i].cpu().numpy())]
+
+        # calculate norm-2's square
+        norm = torch.sum((x1-x2).pow(2),dim=1)
+
+        #calculate RBF function
+        RBF = torch.exp(-self.gamma*norm)
+
+        # calculate loss
+        loss = 1 - RBF
+        return loss.mean()
 
 class Cosine_Similarity_Loss(nn.Module):
     def __init__(self):
