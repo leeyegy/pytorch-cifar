@@ -224,6 +224,9 @@ def test(epoch):
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
 
+    # monitor acc - whole level
+    writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
+
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
