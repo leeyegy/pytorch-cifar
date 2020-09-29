@@ -736,6 +736,7 @@ class RBFLoss(nn.Module):
     def __init__(self,gamma=1.0):
         super(RBFLoss,self).__init__()
         self.gamma = gamma
+
     def forward(self,x1,target):
         """
         :param x1: output of model
@@ -747,6 +748,9 @@ class RBFLoss(nn.Module):
         for i in range(x2.size()[0]):
             x2[i] = target_map[str(target[i].cpu().numpy())]
 
+        x1_ = torch.sqrt(torch.sum(x1 * x1, dim=1)).view(x1.size()[0],1)  # |x1|
+        x1_ = x1_.repeat(1,10)
+        x1 = x1 /x1_
         # calculate norm-2's square
         norm = torch.sum((x1-x2).pow(2),dim=1)
 

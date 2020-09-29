@@ -1,6 +1,6 @@
 for net in ResNet18
 do 
-for max_loss in RBFLoss
+for max_loss in CS
 do 
 	for min_loss in RBFLoss
 	do
