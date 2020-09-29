@@ -48,14 +48,15 @@ parser.add_argument('--beta', default=5.0,
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument("--net",default="ResNet18",type=str)
-parser.add_argument('--resume_best', '-r', action='store_true',
+parser.add_argument('--resume_best', default=False, action='store_true',
                     help='resume from checkpoint')
-parser.add_argument('--resume_last', '-r', action='store_true',
+parser.add_argument('--resume_last', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
-
+parser.add_argument('--gamma', default=1.0,type=float)
 parser.add_argument("--init",type=str)
+parser.add_argument("--loss",type=str)
 args = parser.parse_args()
 
 
@@ -71,8 +72,9 @@ if args.init:
     exp_name = os.path.join("runs", "amart_init_"+args.net)
 
 else:
-    save_path = os.path.join("checkpoint","amart_"+args.net,"beta_"+str(args.beta))
-    exp_name = os.path.join("runs", "amart_"+args.net,"beta_"+str(args.beta))
+    save_path = os.path.join("checkpoint","amart_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
+    # save_path = os.path.join("checkpoint","amart_"+args.loss+args.net,"beta_"+str(args.beta))
+    exp_name = os.path.join("runs", "amart_"+args.loss+"_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -103,6 +105,14 @@ print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
 
+# loss dict
+loss_dict = {"akl":advanced_kl_loss,
+             "amart":advanced_mart_loss,
+             "atrades":advanced_trades_loss,
+             "amart-i":advanced_mart_inverse_loss,
+             }
+criterion = loss_dict[args.loss]
+
 # Data
 print('==> Preparing data..')
 # setup data loader
@@ -130,9 +140,11 @@ if args.init:
     print("cln best acc:{}".format(checkpoint['acc']))
 
 assert not (args.resume_best and args.resume_last)
+
 if args.resume_best:
     # Load checkpoint.
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    print("best resumed")
     checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
@@ -149,7 +161,6 @@ if args.resume_last:
     print('==> Resuming from checkpoint {}'.format(start_epoch))
 
 #define adversary
-# PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=0.007,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
 
@@ -161,13 +172,14 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = advanced_mart_loss(model=model,
+        loss = criterion(model=model,
                            x_natural=data,
                            y=target,
                            optimizer=optimizer,
                            step_size=args.step_size,
                            epsilon=args.epsilon,
                            perturb_steps=args.num_steps,
+                           gamma = args.gamma,
                            beta=args.beta)
         loss.backward()
         optimizer.step()
@@ -265,7 +277,7 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
-    # train(args, net, device, train_loader, optimizer, epoch)
+    train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    break
+    # break
     writer.close()

@@ -1,7 +1,13 @@
-for beta in 5
+for beta in 3
 do
-	for net in WideResNet
+	for net in ResNet18
 	do
-	python amart_train.py --net $net  --beta $beta --epsilon 0.03137 | tee log/amart_training/beta_$beta\_$net\_0.03137.txt
+		for loss in amart-i
+		do
+			for gamma in 1.0
+			do
+	python amart_train.py --gamma $gamma --loss $loss  --net $net  --beta $beta --epsilon 0.03137 | tee log/amart_training/$loss\_beta_$beta\_$net\_gamma_$gamma\_0.03137.txt
+done
+done
 done
 done
