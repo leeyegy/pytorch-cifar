@@ -4,7 +4,7 @@ do
 	do
 		for loss in amart-w
 		do
-			for gamma in 1.0
+			for gamma in 0.5
 			do
 	python amart_train.py --gamma $gamma --loss $loss  --net $net  --beta $beta --epsilon 0.03137 | tee log/amart_training/$loss\_beta_$beta\_$net\_gamma_$gamma\_0.03137.txt
 done

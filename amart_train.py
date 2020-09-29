@@ -103,6 +103,7 @@ net_dict = {"VGG19":VGG('VGG19'),
 print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
+
 # loss dict
 loss_dict = {"akl":advanced_kl_loss,
              "amart":advanced_mart_loss,

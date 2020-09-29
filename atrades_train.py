@@ -56,6 +56,8 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--gamma', default=1,type=float,
                     help='')
+parser.add_argument("--loss",type=str)
+
 args = parser.parse_args()
 
 
@@ -67,8 +69,8 @@ torch.backends.cudnn.benchmark = True
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
-save_path = os.path.join("checkpoint","atrades_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
-exp_name = os.path.join("runs", "atrades_"+args.net,"beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
+save_path = os.path.join("checkpoint","atrades_"+args.net,args.loss+"_beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
+exp_name = os.path.join("runs", "atrades_"+args.net,args.loss+"_beta_"+str(args.beta)+"_gamma_"+str(args.gamma))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -98,6 +100,13 @@ net_dict = {"VGG19":VGG('VGG19'),
 print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
+
+# loss dict
+loss_dict = {
+             "atrades":advanced_trades_loss,
+             "atrades-w":advanced_trades_whole_loss,
+             }
+criterion = loss_dict[args.loss]
 
 # Data
 print('==> Preparing data..')
@@ -151,7 +160,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = advanced_trades_loss(model=model,
+        loss = criterion(model=model,
                            x_natural=data,
                            y=target,
                            optimizer=optimizer,
@@ -258,5 +267,4 @@ for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    # break
     writer.close()
