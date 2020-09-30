@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument("--net",default="ResNet18",type=str)
 parser.add_argument('--test_model_path', type=str)
 parser.add_argument("--loss",type=str,default="CE",choices=["CE","CS"])
-parser.add_argument("--attack_method",type=str,default="FGSM")
+parser.add_argument("--attack_method",type=str,default="FGSM",choices=["PGD","FGSM"])
 parser.add_argument("--epsilon",type=float,default=0.03137)
 
 args = parser.parse_args()
@@ -78,15 +78,21 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
 print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
+checkpoint = torch.load(os.path.join(args.test_model_path))
+net.load_state_dict(checkpoint['net'])
+start_epoch = checkpoint['epoch']
+
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if args.loss == "CS":
-    checkpoint = torch.load(os.path.join(args.test_model_path))
-    net.load_state_dict(checkpoint['net'])
-elif args.loss == "CE":
-    net.load_state_dict(torch.load(os.path.join(args.test_model_path)))
+# if args.loss == "CS":
+#     checkpoint = torch.load(os.path.join(args.test_model_path))
+#     net.load_state_dict(checkpoint['net'])
+# elif args.loss == "CE":
+#     checkpoint = torch.load(os.path.join(args.test_model_path))
+#     net.load_state_dict(checkpoint['net'])
+#     # net.load_state_dict(torch.load(os.path.join(args.test_model_path)))
 # best_acc = checkpoint['acc']
 # # start_epoch = checkpoint['epoch']
 
