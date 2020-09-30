@@ -110,6 +110,7 @@ loss_dict = {"akl":advanced_kl_loss,
              "atrades":advanced_trades_loss,
              "amart-i":advanced_mart_inverse_loss,
              "amart-w":advanced_mart_whole_loss,
+             "amart-w2":advanced_mart_whole_loss_v2,
              }
 criterion = loss_dict[args.loss]
 
