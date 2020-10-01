@@ -2,3 +2,5 @@
 Files already downloaded and verified
 Files already downloaded and verified
 ==> Building model..
+natural_correct_total:  8267.0
+robust_correct_total:  4994.0
