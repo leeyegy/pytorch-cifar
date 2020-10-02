@@ -58,6 +58,11 @@ parser.add_argument("--init",type=str)
 parser.add_argument("--loss",type=str)
 args = parser.parse_args()
 
+# for wideres
+if args.net == "WideResNet":
+    args.epochs = 90
+    args.weight_decay = 7e-4
+    args.lr = 0.1
 
 torch.manual_seed(args.seed)
 device ='cuda' if torch.cuda.is_available() else 'cpu'
