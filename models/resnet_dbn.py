@@ -43,7 +43,7 @@ class BasicBlock(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
 
-    def forward(self, x,mode="cln"):
+    def forward(self, x,mode="adv"):
         if mode == "cln":
             out = F.relu(self.cln_bn1(self.conv1(x)))
             out = self.cln_bn2(self.conv2(out))
@@ -112,7 +112,7 @@ class ResNet(nn.Module):
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
 
-    def forward(self, x,mode="cln"):
+    def forward(self, x,mode="adv"):
         if mode == "cln":
             out = F.relu(self.cln_bn1(self.conv1(x)))
             out = self.layer1[1](self.layer1[0](out,mode),mode)

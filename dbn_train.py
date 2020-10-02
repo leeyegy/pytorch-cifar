@@ -1,40 +1,77 @@
-'''Train CIFAR10 with PyTorch.'''
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
-
-import torchvision
-import torchvision.transforms as transforms
-
+from __future__ import print_function
 import os
 import argparse
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision
+import torch.optim as optim
+from torchvision import datasets, transforms
+from torch.autograd import Variable
 
 from models import *
-from utils import progress_bar
+from utils import  progress_bar
 from loss import *
+import numpy as np
+import time
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
+from tensorboardX import SummaryWriter
+from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
+from autoattack import AutoAttack
 
 
-parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+
+parser = argparse.ArgumentParser(description='PyTorch CIFAR MART Defense')
+parser.add_argument('--batch-size', type=int, default=128, metavar='N',
+                    help='input batch size for training (default: 128)')
+parser.add_argument('--test-batch-size', type=int, default=100, metavar='N',
+                    help='input batch size for testing (default: 100)')
+parser.add_argument('--epochs', type=int, default=120, metavar='N',
+                    help='number of epochs to train')
+parser.add_argument('--weight-decay', '--wd', default=2e-4,
+                    type=float, metavar='W')
+parser.add_argument('--lr', type=float, default=0.1, metavar='LR',
+                    help='learning rate')
+parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
+                    help='SGD momentum')
+parser.add_argument('--no-cuda', action='store_true', default=False,
+                    help='disables CUDA training')
+parser.add_argument('--epsilon', default=0.03137,type=float,
+                    help='perturbation')
+parser.add_argument('--num-steps', default=10,
+                    help='perturb number of steps')
+parser.add_argument('--step-size', default=0.007,
+                    help='perturb step size')
+parser.add_argument('--beta', default=6.0,type=float,
+                    help='weight before kl (misclassified examples)')
+parser.add_argument('--seed', type=int, default=1, metavar='S',
+                    help='random seed (default: 1)')
 parser.add_argument("--net",default="ResNet18",type=str)
-parser.add_argument('--resume', '-r', action='store_true',
+parser.add_argument('--resume_best', default=False, action='store_true',
                     help='resume from checkpoint')
-parser.add_argument("--min_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
-parser.add_argument("--max_loss",type=str,default="CE",choices=["CE","CS","FOCAL"])
-parser.add_argument("--attack_method",type=str,default="PGD")
-parser.add_argument("--epsilon",type=float,default=0.03137)
+parser.add_argument('--resume_last', default=False, action='store_true',
+                    help='resume from checkpoint')
+parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+                    help='how many batches to wait before logging training status')
 args = parser.parse_args()
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+torch.manual_seed(args.seed)
+device ='cuda' if torch.cuda.is_available() else 'cpu'
+kwargs = {'num_workers': 10, 'pin_memory': True}
+torch.backends.cudnn.benchmark = True
+
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint",args.min_loss+"_"+args.max_loss+"_"+args.net,"adv_"+args.attack_method+"_"+str(args.epsilon))
+
+save_path = os.path.join("checkpoint","trades_"+args.net,"beta_"+str(args.beta))
+exp_name = os.path.join("runs", "trades_"+args.net,"beta_"+str(args.beta))
+
 if not os.path.exists(save_path):
     os.makedirs(save_path)
+# define tensorboard
+writer = SummaryWriter(exp_name)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
@@ -52,129 +89,133 @@ net_dict = {"VGG19":VGG('VGG19'),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF(),
-            "ResNet18_dbn":ResNet18_dbn()
-}
-
-loss_dict = {"CE":nn.CrossEntropyLoss() ,
-            "CS": Cosine_Similarity_Loss(),
-            "FOCAL":Focal_Loss()
-}
-
-# Data
-print('==> Preparing data..')
-transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-])
-
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-])
-
-trainset = torchvision.datasets.CIFAR10(
-    root='/home/Leeyegy/.torch/datasets', train=True, download=True, transform=transform_train)
-trainloader = torch.utils.data.DataLoader(
-    trainset, batch_size=128, shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(
-    root='/home/Leeyegy/.torch/datasets', train=False, download=True, transform=transform_test)
-testloader = torch.utils.data.DataLoader(
-    testset, batch_size=100, shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat', 'deer',
-           'dog', 'frog', 'horse', 'ship', 'truck')
+            "WideResNet":WideResNet(),
+            "ResNet18_dbn": ResNet18_dbn()
+            }
 
 # Model
 print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
+
+# Data
+print('==> Preparing data..')
+# setup data loader
+transform_train = transforms.Compose([
+    transforms.RandomCrop(32, padding=4),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+])
+transform_test = transforms.Compose([
+    transforms.ToTensor(),
+])
+trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
+testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
+
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
-    cudnn.benchmark = True
 
-if args.resume:
+assert not (args.resume_best and args.resume_last)
+
+if args.resume_best:
     # Load checkpoint.
-    print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    print("best resumed")
     checkpoint = torch.load(os.path.join(save_path,'ckpt.pth'))
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
+    print('==> Resuming from checkpoint {}'.format(start_epoch))
 
-
-criterion = loss_dict[args.min_loss]
-adversary_loss = loss_dict[args.max_loss]
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                      momentum=0.9, weight_decay=5e-4)
-
+if args.resume_last:
+    # Load checkpoint.
+    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load(os.path.join(save_path,'ckpt_last.pth'))
+    net.load_state_dict(checkpoint['net'])
+    best_acc = checkpoint['acc']
+    start_epoch = checkpoint['epoch']
+    print('==> Resuming from checkpoint {}'.format(start_epoch))
 
 #define adversary
-if args.attack_method == "FGSM":
-    adversary = GradientSignAttack(net,eps=args.epsilon,loss_fn=adversary_loss,clip_min=0.0,clip_max=1.0)
-elif args.attack_method == "PGD":
-    adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=10,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
-PGD_adversary = LinfPGDAttack(net,eps=0.03137,nb_iter=20,eps_iter=0.007,loss_fn=adversary_loss,rand_init=True)
+PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+# AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
 
-# Training
-def train(epoch):
-    print('\nEpoch: %d' % epoch)
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-
+def train(args, model, device, train_loader, optimizer, epoch):
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
-        cln_outputs = net(inputs,mode="cln")
-        with ctx_noparamgrad_and_eval(net):
-            adv_data = adversary.perturb(inputs,targets)
-        adv_outputs = net(adv_data,mode="adv")
-        loss = criterion(cln_outputs, targets) + criterion(adv_outputs,targets)
+
+        # calculate robust loss
+        loss = trades_dbn_loss(model=model,
+                           x_natural=data,
+                           y=target,
+                           optimizer=optimizer,
+                           step_size=args.step_size,
+                           epsilon=args.epsilon,
+                           perturb_steps=args.num_steps,
+                           beta=args.beta)
         loss.backward()
         optimizer.step()
 
-        train_loss += loss.item()
-        total += targets.size(0)
-
-        correct += get_correct_num(cln_outputs,targets,args.max_loss)
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-
+        # print progress
+        if batch_idx % args.log_interval == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(data), len(train_loader.dataset),
+                       100. * batch_idx / len(train_loader), loss.item()))
 
 def test(epoch):
     global best_acc
     net.eval()
-    test_loss = 0
-    pgd_loss = 0
-    cln_bn_pgd_correct = 0
     pgd_correct = 0
     correct = 0
     total = 0
-    for batch_idx, (inputs, targets) in enumerate(testloader):
+
+    adv_stat_correct = torch.zeros([10]).cuda()
+    adv_stat_total = torch.zeros([10]).cuda()
+    adv_stat_output = torch.zeros([10, 10]).cuda()
+    adv_stat_shannon_total = torch.zeros([10]).cuda()
+
+    for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
         with torch.no_grad():
             outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        test_loss += loss.item()
         total += targets.size(0)
-        correct += get_correct_num(outputs,targets,args.max_loss)
+        correct += get_correct_num(outputs,targets,"CE")
 
         with ctx_noparamgrad_and_eval(net):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
-        with torch.no_grad():
-            outputs = net(pgd_data,mode="adv")
-            cln_bn_outputs = net(pgd_data)
-        loss = criterion(outputs, targets)
-        pgd_loss += loss.item()
-        pgd_correct += get_correct_num(outputs,targets,args.max_loss)
-        cln_bn_pgd_correct += get_correct_num(cln_bn_outputs,targets,args.max_loss)
+        # pgd_data = AA_adversary.run_standard_evaluation(inputs, targets, bs=args.test_batch_size)
 
-        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d) PgdClnBnAcc:%.3f%% (%d/%d)'
-                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total,100.*cln_bn_pgd_correct/total,cln_bn_pgd_correct,total))
+        with torch.no_grad():
+            outputs = net(pgd_data)
+        pgd_correct += get_correct_num(outputs,targets,"CE")
+
+        # for tensorboard
+        prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
+        _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
+        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
+
+
+        progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
+                     % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+
+    adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
+    adv_stat_output /= adv_stat_shannon_total
+    adv_entropy = _calculate_information_entropy(adv_stat_output)
+
+    #monitor shannon - class level
+    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+
+    #monitor acc - class level
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
+
+    #monitor acc - whole level
+    writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
+
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
@@ -199,20 +240,23 @@ def test(epoch):
             os.mkdir('checkpoint')
         torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
 
-
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 75:
-        lr = args.lr * 0.1
-    if epoch >= 90:
-        lr = args.lr * 0.01
     if epoch >= 100:
         lr = args.lr * 0.001
+    elif epoch >= 90:
+        lr = args.lr * 0.01
+    elif epoch >= 75:
+        lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+optimizer = optim.SGD(net.parameters(), lr=args.lr,
+                      momentum=args.momentum, weight_decay=args.weight_decay)
+
 for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
-    train(epoch)
+    train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
+    writer.close()
