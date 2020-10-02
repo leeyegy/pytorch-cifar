@@ -43,7 +43,7 @@ parser.add_argument('--num-steps', default=10,
                     help='perturb number of steps')
 parser.add_argument('--step-size', default=0.007,
                     help='perturb step size')
-parser.add_argument('--beta', default=6.0,
+parser.add_argument('--beta', default=6.0,type=float,
                     help='weight before kl (misclassified examples)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
@@ -105,6 +105,7 @@ net = net.to(device)
 loss_dict = {
              "atrades":advanced_trades_loss,
              "atrades-w":advanced_trades_whole_loss,
+             "atrades-mentor": advanced_trades_mentor_loss,
              }
 criterion = loss_dict[args.loss]
 
