@@ -2,7 +2,7 @@ for beta in 5
 do
 	for net in ResNet18
 	do
-		for loss in amart-w2
+		for loss in amart-mentor
 		do
 			for gamma in 1.0
 			do

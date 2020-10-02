@@ -1,4 +1,4 @@
-for beta in 2
+for beta in 6 
 do
 	for net in ResNet18
 	do

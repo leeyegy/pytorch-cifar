@@ -5,6 +5,9 @@ from torch.autograd import Variable
 import torch.optim as optim
 import  numpy as np
 import math
+from models import *
+import os
+
 target_map = {"0":torch.from_numpy(np.asarray([0,0.333,0.333,0.333,0.333,0.333,0.333,0.333,0.333,0.333])),
        "1":torch.from_numpy(np.asarray([1,0.,0.,0.,0.,0.,0.,0.,0.,0.])),
        "2":torch.from_numpy(np.asarray([0,-0.118,0.943,-0.118,-0.118,-0.118,-0.118,-0.118,-0.118,-0.118])),
@@ -15,6 +18,14 @@ target_map = {"0":torch.from_numpy(np.asarray([0,0.333,0.333,0.333,0.333,0.333,0
        "7":torch.from_numpy(np.asarray([0,-0.289,2.134e-16,4.914e-16,6.410e-17,-1.282e-16,1.282e-16,0.866,-0.289,-0.289])),
        "8":torch.from_numpy(np.asarray([0,-0.408,3.108e-16,7.576e-16,9.712e-17,-1.165e-16,2.331e-16,-3.885e-17,0.816,-0.408])),
        "9":torch.from_numpy(np.asarray([0,-0.707,5.103e-16,1.178e-15,1.963e-16,-1.57e-16,3.140e-16,-3.925e-17,-2.355e-16,0.707]))}
+
+# get mentor nat_probs
+# Model
+mentor = ResNet18()
+mentor = mentor.cuda()
+mentor = torch.nn.DataParallel(mentor)
+mentor_checkpoint = torch.load(os.path.join("checkpoint", 'clean_ce_res18.pth'))
+mentor.load_state_dict(mentor_checkpoint['net'])
 
 def advanced_kl_loss(model,
               x_natural,
@@ -432,6 +443,58 @@ def advanced_mart_inverse_loss(model,
 
     loss_robust = (1.0 / batch_size) * torch.sum(
         torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * ((2.718281828459-torch.exp(1.0000001 - true_adv_probs))/1.718281828459))
+    loss = loss_adv + float(beta) * loss_robust
+
+    return loss
+
+def advanced_mart_mentor_loss(model,
+              x_natural,
+              y,
+              optimizer,
+              mentor_model=None,
+              step_size=0.007,
+              epsilon=0.031,
+              perturb_steps=10,
+              beta=6.0,
+              gamma=1.0,
+              distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+    # generate adversarial example
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    logits_adv = model(x_adv)
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1]) # misclassified max prob label
+
+    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    true_adv_probs = torch.gather(adv_probs, 1, (y.unsqueeze(1)).long()).squeeze()
+
+    # get mentor nat_probs
+    mentor_nat_probs = F.softmax(mentor(x_natural), dim=1)
+
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), mentor_nat_probs), dim=1) * ((1.0000001 - true_adv_probs) ** gamma))
     loss = loss_adv + float(beta) * loss_robust
 
     return loss
