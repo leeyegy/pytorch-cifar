@@ -255,9 +255,9 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'))
+        torch.save(state, os.path.join(save_path,'ckpt-{}.pth'.format(epoch)))
         best_acc = acc
-    if epoch == 119:
+    if epoch == args.epoch_nb-1:
         print('Saving Last..')
         state = {
             'net': net.state_dict(),
@@ -266,31 +266,31 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
-
-# def adjust_learning_rate(optimizer, epoch):
-#     """decrease the learning rate"""
-#     lr = args.lr
-#     if epoch >= 45:
-#         lr = args.lr * 0.001
-#     elif epoch >= 35:
-#         lr = args.lr * 0.01
-#     elif epoch >= 20:
-#         lr = args.lr * 0.1
-#     for param_group in optimizer.param_groups:
-#         param_group['lr'] = lr
+        torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
 
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 100:
+    if epoch >= 50:
         lr = args.lr * 0.001
-    elif epoch >= 90:
+    elif epoch >= 40:
         lr = args.lr * 0.01
-    elif epoch >= 75:
+    elif epoch >= 30:
         lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+# def adjust_learning_rate(optimizer, epoch):
+#     """decrease the learning rate"""
+#     lr = args.lr
+#     if epoch >= 100:
+#         lr = args.lr * 0.001
+#     elif epoch >= 90:
+#         lr = args.lr * 0.01
+#     elif epoch >= 75:
+#         lr = args.lr * 0.1
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
 
 optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)

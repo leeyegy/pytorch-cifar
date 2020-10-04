@@ -255,9 +255,9 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'))
+        torch.save(state, os.path.join(save_path,'ckpt-{}.pth'.format(epoch)))
         best_acc = acc
-    if epoch == 119:
+    if epoch == args.epoch_nb-1:
         print('Saving Last..')
         state = {
             'net': net.state_dict(),
@@ -266,16 +266,16 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
+        torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
 
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 45:
+    if epoch >= 50:
         lr = args.lr * 0.001
-    elif epoch >= 35:
+    elif epoch >= 40:
         lr = args.lr * 0.01
-    elif epoch >= 20:
+    elif epoch >= 30:
         lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -299,5 +299,4 @@ for epoch in range(start_epoch, args.epoch_nb):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    # break
     writer.close()

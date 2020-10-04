@@ -113,9 +113,9 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
@@ -231,9 +231,9 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'))
+        torch.save(state, os.path.join(save_path,'ckpt-{}.pth'.format(epoch)))
         best_acc = acc
-    if epoch == 119:
+    if epoch == args.epochs-1:
         print('Saving Last..')
         state = {
             'net': net.state_dict(),
@@ -242,26 +242,38 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path, 'ckpt_last.pth'))
+        torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
+
 
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 100:
+    if epoch >= 50:
         lr = args.lr * 0.001
-    elif epoch >= 90:
+    elif epoch >= 40:
         lr = args.lr * 0.01
-    elif epoch >= 75:
+    elif epoch >= 30:
         lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+# def adjust_learning_rate(optimizer, epoch):
+#     """decrease the learning rate"""
+#     lr = args.lr
+#     if epoch >= 100:
+#         lr = args.lr * 0.001
+#     elif epoch >= 90:
+#         lr = args.lr * 0.01
+#     elif epoch >= 75:
+#         lr = args.lr * 0.1
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
+
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 
-for epoch in range(start_epoch, 120):
+for epoch in range(start_epoch, args.epochs):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    # break
     writer.close()
