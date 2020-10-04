@@ -56,6 +56,7 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--random_bn', default=False, action='store_true',
                     help='random bn')
+parser.add_argument('--epoch_nb', type=int, default=120)
 args = parser.parse_args()
 
 # for wideres
@@ -71,8 +72,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","bn_"+args.net,"mart_beta_"+str(args.beta)) if not args.random_bn else os.path.join("checkpoint","random_bn_"+args.net,"mart_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "bn_"+args.net,"mart_beta_"+str(args.beta)) if not args.random_bn else os.path.join("runs", "random_bn_"+args.net,"mart_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","bn_"+args.net,str(args.epoch_nb)+"_mart_beta_"+str(args.beta)) if not args.random_bn else os.path.join("checkpoint","random_bn_"+args.net,str(args.epoch_nb)+"_mart_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "bn_"+args.net,str(args.epoch_nb)+"_mart_beta_"+str(args.beta)) if not args.random_bn else os.path.join("runs", "random_bn_"+args.net,str(args.epoch_nb)+"_mart_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -124,6 +125,7 @@ if device == 'cuda':
 
 checkpoint = torch.load(os.path.join("checkpoint",'clean_ce_res18.pth'))
 if args.random_bn:
+    print("random bn init ~")
     model_dict = net.state_dict()
     pretrained_dict = checkpoint['net']
     pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("bn" in k or "linear" in k or "shortcut.1." in k)}
@@ -138,10 +140,10 @@ for k,v in net.named_parameters():
     if "bn" in k or "linear" in k or "shortcut.1." in k:
         v.requires_grad=False
 
-# for k,v in net.named_parameters():
-#     if "bn" in k or "linear" in k or "shortcut.1." in k:
-#         print(k)
-#         print(v.requires_grad)
+for k,v in net.named_parameters():
+    if "bn" in k or "linear" in k or "shortcut.1." in k:
+        print(k)
+        print(v.requires_grad)
 
 assert not (args.resume_best and args.resume_last)
 
@@ -269,19 +271,31 @@ def test(epoch):
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 100:
+    if epoch >= 45:
         lr = args.lr * 0.001
-    elif epoch >= 90:
+    elif epoch >= 35:
         lr = args.lr * 0.01
-    elif epoch >= 75:
+    elif epoch >= 20:
         lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+# def adjust_learning_rate(optimizer, epoch):
+#     """decrease the learning rate"""
+#     lr = args.lr
+#     if epoch >= 100:
+#         lr = args.lr * 0.001
+#     elif epoch >= 90:
+#         lr = args.lr * 0.01
+#     elif epoch >= 75:
+#         lr = args.lr * 0.1
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
+
 optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 
-for epoch in range(start_epoch, 120):
+for epoch in range(start_epoch, args.epoch_nb):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
