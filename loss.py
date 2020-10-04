@@ -21,11 +21,12 @@ target_map = {"0":torch.from_numpy(np.asarray([0,0.333,0.333,0.333,0.333,0.333,0
 
 # get mentor nat_probs
 # Model
-mentor = ResNet18()
-mentor = mentor.cuda()
-mentor = torch.nn.DataParallel(mentor)
-mentor_checkpoint = torch.load(os.path.join("checkpoint", 'clean_ce_res18.pth'))
-mentor.load_state_dict(mentor_checkpoint['net'])
+if os.path.exists(os.path.join("checkpoint", 'clean_ce_res18.pth')):
+    mentor = ResNet18()
+    mentor = mentor.cuda()
+    mentor = torch.nn.DataParallel(mentor)
+    mentor_checkpoint = torch.load(os.path.join("checkpoint", 'clean_ce_res18.pth'))
+    mentor.load_state_dict(mentor_checkpoint['net'])
 
 def advanced_kl_loss(model,
               x_natural,
@@ -169,7 +170,6 @@ def trades_dbn_loss(model,
             with torch.enable_grad():
                 loss_kl = criterion_kl(F.log_softmax(model(x_adv,mode="adv"), dim=1),
                                        F.softmax(model(x_natural,mode="adv"), dim=1))
-
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -212,10 +212,11 @@ def trades_dbn_loss(model,
     optimizer.zero_grad()
     # calculate robust loss
     logits = model(x_natural,mode="cln")
-    loss_natural = F.cross_entropy(logits, y)
+    loss_natural_cln = F.cross_entropy(logits, y)
+    loss_natural_adv = F.cross_entropy(model(x_natural,mode="adv"),y)
     loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv,mode="adv"), dim=1),
                                                     F.softmax(model(x_natural,mode="adv"), dim=1))
-    loss = loss_natural + beta * loss_robust
+    loss = loss_natural_cln + loss_natural_adv + beta * loss_robust
     return loss
 
 def trades_loss(model,
@@ -381,6 +382,174 @@ def advanced_trades_loss(model,
         torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * ((1.0000001 - true_adv_probs) ** gamma))
     loss = (loss_clean*((1.0000001 - true_cln_probs)**gamma)).mean() + float(beta) * loss_robust
     return loss # 在amart_train文件下跑的atrades版本没有对loss_clean也进行加权
+
+def mart_topk_loss(model,
+              x_natural,
+              y,
+              previous_batch_data,
+              previous_batch_target,
+              ratio,
+              optimizer,
+              step_size=0.007,
+              epsilon=0.031,
+              perturb_steps=10,
+              beta=6.0,
+              distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+
+    # generate adversarial example for this batch
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+
+# get the max-ratio loss part
+    with torch.no_grad():
+        adv_logits = model(x_adv)
+        true_adv_probs = torch.gather(F.softmax(adv_logits, dim=1), 1, (y.unsqueeze(1)).long()).squeeze()
+        sorted, index = torch.sort(true_adv_probs, descending=False)
+
+    # sort
+    this_prev_x_natural = x_natural.clone().detach()[index[0:int(batch_size*ratio)]]
+    this_prev_x_adv = x_adv.clone().detach()[index[0:int(batch_size*ratio)]]
+    this_prev_y = y.clone().detach()[index[0:int(batch_size*ratio)]]
+
+    model.train()
+
+    x_adv = Variable(torch.clamp(this_prev_x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    logits = model(this_prev_x_natural)
+
+    logits_adv = model(x_adv)
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+
+    new_y = torch.where(tmp1[:, -1] == this_prev_y, tmp1[:, -2], tmp1[:, -1])
+
+    loss_adv = F.cross_entropy(logits_adv, this_prev_y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+
+    nat_probs = F.softmax(logits, dim=1)
+
+    true_probs = torch.gather(nat_probs, 1, (this_prev_y.unsqueeze(1)).long()).squeeze()
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+    loss = loss_adv + float(beta) * loss_robust
+    return loss,previous_batch_data,previous_batch_target
+
+def mart_ohem_loss(model,
+              x_natural,
+              y,
+              previous_batch_data,
+              previous_batch_target,
+              ratio,
+              optimizer,
+              step_size=0.007,
+              epsilon=0.031,
+              perturb_steps=10,
+              beta=6.0,
+              distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+    this_prev_x_natural = torch.ones(x_natural.size()).to(x_natural)
+    this_prev_x_adv = torch.ones(x_natural.size()).to(x_natural)
+    this_prev_y = torch.ones(y.size()).to(y)
+
+    # calculate previous batch loss
+    if previous_batch_data is None:
+        pass
+    else:
+        pre_natural = previous_batch_data["cln"]
+        pre_adv = previous_batch_data["adv"]
+        pre_target = previous_batch_target
+
+    # generate adversarial example for this batch
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+
+# get the max-ratio loss part
+    with torch.no_grad():
+        adv_logits = model(x_adv)
+        true_adv_probs = torch.gather(F.softmax(adv_logits, dim=1), 1, (y.unsqueeze(1)).long()).squeeze()
+        _, index = torch.sort(true_adv_probs, descending=False)
+    if previous_batch_data is not None:
+        # sort
+        this_prev_x_natural[0:int(batch_size*ratio)] = x_natural.clone().detach()[index[0:int(batch_size*ratio)]]
+        this_prev_x_adv[0:int(batch_size*ratio)] = x_adv.clone().detach()[index[0:int(batch_size*ratio)]]
+        this_prev_y[0:int(batch_size*ratio)] = y.clone().detach()[index[0:int(batch_size*ratio)]]
+        this_prev_x_natural[int(batch_size * ratio):batch_size] = pre_natural.clone().detach()[0:batch_size-int(batch_size * ratio)]
+        this_prev_x_adv[int(batch_size * ratio):batch_size] = pre_adv.clone().detach()[0:batch_size-int(batch_size * ratio)]
+        this_prev_y[int(batch_size * ratio):batch_size] = pre_target.clone().detach()[0:batch_size-int(batch_size * ratio)]
+    else:
+        this_prev_x_natural = x_natural
+        this_prev_x_adv = x_adv
+        this_prev_y = y
+
+    # update prev
+    previous_batch_data = {"cln":x_natural.clone().detach()[index[0:batch_size-int(batch_size*ratio)]],
+                           "adv":x_adv.clone().detach()[index[0:batch_size-int(batch_size*ratio)]]}
+    previous_batch_target = y.clone().detach()[index[0:batch_size-int(batch_size*ratio)]]
+
+
+    model.train()
+
+    x_adv = Variable(torch.clamp(this_prev_x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    logits = model(this_prev_x_natural)
+
+    logits_adv = model(x_adv)
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+
+    new_y = torch.where(tmp1[:, -1] == this_prev_y, tmp1[:, -2], tmp1[:, -1])
+
+    loss_adv = F.cross_entropy(logits_adv, this_prev_y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+
+    nat_probs = F.softmax(logits, dim=1)
+
+    true_probs = torch.gather(nat_probs, 1, (this_prev_y.unsqueeze(1)).long()).squeeze()
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+    loss = loss_adv + float(beta) * loss_robust
+
+
+    return loss,previous_batch_data,previous_batch_target
 
 def mart_loss(model,
               x_natural,
