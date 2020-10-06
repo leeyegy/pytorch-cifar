@@ -17,7 +17,7 @@ import time
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
-from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
+from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy,_analyze_misclassified_as_king
 from autoattack import AutoAttack
 
 
@@ -219,9 +219,8 @@ def test(epoch):
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
         adv_misclassified_as_king += _analyze_misclassified_as_king(prediction,targets,args.emphasize_label)
-        print(adv_misclassified_as_king)
-        # progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
-        #              % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
+        progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
+                     % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
     adv_stat_output /= adv_stat_shannon_total
@@ -236,8 +235,12 @@ def test(epoch):
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
 
+    #monitor - misclassified as king label
+    writer.add_scalar("test_adv_misclassified_as_king",100.*adv_misclassified_as_king/9000,epoch)
+
     # Save checkpoint.
-    acc = 100.*pgd_correct/total
+    acc = (adv_stat_correct[args.emphasize_label] + (1-100.*adv_misclassified_as_king/9000)) / 2
+
     if acc > best_acc:
         print('Saving..')
         state = {
