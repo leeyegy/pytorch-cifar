@@ -605,8 +605,13 @@ def ensemble_mart_loss(model,
     emphasize_adv_data = non_targeted_attack(model,emphasize_data,y[y==emphasize_label],step_size,epsilon,perturb_steps)
     normal_adv_data = targeted_attack(model,normal_data,emphasize_label,step_size,epsilon,perturb_steps)
     x_adv = torch.ones(x_natural.size()).to(x_natural)
+    y_rerange = torch.ones(y.size()).to(y)
+
     x_adv[0:emphasize_adv_data.size()[0]] = emphasize_adv_data
+    y_rerange[0:emphasize_adv_data.size()[0]] = y[y==emphasize_label]
     x_adv[emphasize_adv_data.size()[0]:] = normal_adv_data
+    y_rerange[emphasize_adv_data.size()[0]:] = y[y!=emphasize_label]
+    y = y_rerange.clone().detach()
 
     model.train()
 
