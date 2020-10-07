@@ -156,7 +156,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         data = data[mask]
         target = target[mask]
         target -= 2
-        
+
         optimizer.zero_grad()
 
         # calculate robust loss
