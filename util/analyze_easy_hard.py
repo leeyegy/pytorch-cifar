@@ -29,6 +29,13 @@ def _calculate_information_entropy(input):
             ans[i] += -input[i,k] * log(input[i,k],2)
     return ans
 
+def _analyze_king_classified(prediction,targets,king,classified):
+    king_predicion = prediction[targets==king]
+    # 遍历得到其输出情况
+    for i in range(king_predicion.size()[0]):
+        classified[king_predicion[i]] += 1
+    return classified
+
 def _analyze_misclassified_as_king(prediction,targets,king):
     return ((prediction == king) & (targets!=king)).sum()
 

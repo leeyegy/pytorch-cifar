@@ -17,7 +17,7 @@ import time
 from advertorch.attacks import GradientSignAttack,LinfPGDAttack
 from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
-from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy,_analyze_misclassified_as_king
+from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy,_analyze_misclassified_as_king,_analyze_king_classified
 from autoattack import AutoAttack
 
 
@@ -43,7 +43,7 @@ parser.add_argument('--num-steps', default=10,
                     help='perturb number of steps')
 parser.add_argument('--step-size', default=0.007,
                     help='perturb step size')
-parser.add_argument('--beta', default=5.0,
+parser.add_argument('--beta', default=5.0,type=float,
                     help='weight before kl (misclassified examples)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
@@ -171,6 +171,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss = ensemble_mart_loss(model=model,
                            x_natural=data,
                            y=target,
+                           epoch = epoch,
                            emphasize_label=args.emphasize_label,
                            optimizer=optimizer,
                            step_size=args.step_size,
@@ -198,6 +199,7 @@ def test(epoch):
     adv_stat_output = torch.zeros([10, 10]).cuda()
     adv_stat_shannon_total = torch.zeros([10]).cuda()
     adv_misclassified_as_king = 0
+    adv_king_classified = torch.zeros([10]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -219,6 +221,7 @@ def test(epoch):
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
         _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
         adv_misclassified_as_king += _analyze_misclassified_as_king(prediction,targets,args.emphasize_label)
+        adv_king_classified = _analyze_king_classified(prediction,targets,args.emphasize_label,adv_king_classified)
         progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
@@ -231,12 +234,16 @@ def test(epoch):
 
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
-
+    print("类{}的分类准确度:{}".format(args.emphasize_label,adv_stat_correct[args.emphasize_label]))
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
 
     #monitor - misclassified as king label
     writer.add_scalar("test_adv_misclassified_as_king",100.*adv_misclassified_as_king/9000,epoch)
+    print("错误分类数量：{}".format(adv_misclassified_as_king))
+    print("重要类别的全部分类情况：")
+    for i in range(10):
+        print("分成类别{}的数量为：{}".format(i,adv_king_classified[i]))
 
     # Save checkpoint.
     acc = (adv_stat_correct[args.emphasize_label] + (1-100.*adv_misclassified_as_king/9000)) / 2
@@ -280,6 +287,7 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
 
 for epoch in range(start_epoch, args.epochs):
     # adjust_learning_rate(optimizer,epoch)
-    train(args, net, device, train_loader, optimizer, epoch)
+    # train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
+    break
     writer.close()

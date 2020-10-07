@@ -585,86 +585,105 @@ def targeted_attack(model,x_natural,targeted_label,step_size=0.007,epsilon=0.031
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     return x_adv.clone().detach()
 
+def _ce_loss(output,target):
+    log_softmax = nn.LogSoftmax()(output) # [batch_size,10]
+    ce_loss = torch.ones(log_softmax.size()[0]).cuda()
+    for i in range(target.size()[0]):
+        ce_loss[i] = - log_softmax[i, target[i]]
+    return ce_loss
+
 def ensemble_mart_loss(model,
               x_natural,
               y,
               optimizer,
+              epoch,
               emphasize_label=3,
               step_size=0.007,
               epsilon=0.031,
               perturb_steps=10,
               beta=6.0,
               distance='l_inf'):
-    kl = nn.KLDivLoss(reduction='none')
     model.eval()
     batch_size = len(x_natural)
-    print(batch_size)
-
-    # divide data
-    emphasize_data = x_natural[y==emphasize_label]
-    normal_data = x_natural[y!=emphasize_label]
-    emphasize_target = y[y==emphasize_label]
-    normal_target = y[y!=emphasize_label]
-    normal_targeted_label = normal_target.clone().detach()
-    normal_targeted_label[:] = emphasize_label
 
     # define adversary
     PGD_nontargted = LinfPGDAttack(model, eps=epsilon, nb_iter=perturb_steps, eps_iter=step_size,
                                   loss_fn=nn.CrossEntropyLoss(), rand_init=True,targeted=False)
-    PGD_targted = LinfPGDAttack(model, eps=epsilon, nb_iter=perturb_steps, eps_iter=step_size,
-                                  loss_fn=nn.CrossEntropyLoss(), rand_init=True,targeted=True)
+
     # generate adversarial_example
     with ctx_noparamgrad_and_eval(model):
-        adv_emphasize_data = PGD_nontargted.perturb(emphasize_data, emphasize_target) #对重要类别进行无目标攻击
-        adv_normal_data = PGD_targted.perturb(normal_data, normal_targeted_label) # 对其他类别进行目标攻击
-
-    # # generate adversarial example
-    # emphasize_adv_data = non_targeted_attack(model,emphasize_data,y[y==emphasize_label],step_size,epsilon,perturb_steps)
-    # normal_adv_data = targeted_attack(model,normal_data,emphasize_label,step_size,epsilon,perturb_steps)
-    # x_adv = torch.ones(x_natural.size()).to(x_natural)
-    # y_rerange = torch.ones(y.size()).to(y)
-    # x_natural_rerange = torch.ones(x_natural.size()).to(x_natural)
-    #
-    #
-    # x_adv[0:emphasize_adv_data.size()[0]] = emphasize_adv_data
-    # y_rerange[0:emphasize_adv_data.size()[0]] = y[y==emphasize_label]
-    # x_natural_rerange[0:emphasize_adv_data.size()[0]] = x_natural[y==emphasize_label]
-    # x_adv[emphasize_adv_data.size()[0]:] = normal_adv_data
-    # y_rerange[emphasize_adv_data.size()[0]:] = y[y!=emphasize_label]
-    # x_natural_rerange[emphasize_adv_data.size()[0]:] = x_natural[y!=emphasize_label]
-    #
-    #
-    # y = y_rerange.clone().detach()
-    # x_natural = x_natural_rerange.clone().detach()
+        adv_data = PGD_nontargted.perturb(x_natural, y)
 
     model.train()
     optimizer.zero_grad()
-    loss_nontarget = F.cross_entropy(model(adv_emphasize_data),emphasize_target) # 计算重要对抗样本的loss
-    loss_target = F.cross_entropy(model(adv_normal_data),normal_target) # 计算其他对抗样本的loss，注意都应该使用ground-truth的类别
-    loss = (loss_nontarget*adv_emphasize_data.size()[0] + loss_target*adv_normal_data.size()[0])/batch_size
-    # # zero gradient
-    # optimizer.zero_grad()
+
+    ce_loss = _ce_loss(model(adv_data), y)
+    # easy mode
+    if (epoch+1) % 5 != 0:
+        ce_loss[y != emphasize_label] = 0
+    else:
+        pass
+    return ce_loss.mean()
+
+    # # normal part
+    # normal_output = model(adv_normal_data)
+    # normal_adv_probs = F.softmax(normal_output, dim=1)
     #
-    # logits = model(x_natural)
+    # loss_normal = F.nll_loss(torch.log(1.0001 - normal_adv_probs + 1e-12), normal_targeted_label) # away from normal_targeted_label
     #
-    # logits_adv = model(x_adv)
     #
-    # adv_probs = F.softmax(logits_adv, dim=1)
+    # # emphasize part
+    # emphasize_loss = F.cross_entropy(model(adv_emphasize_data),emphasize_target)
     #
-    # tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    # loss = (loss_normal*adv_normal_data.size()[0]  + emphasize_loss*adv_emphasize_data.size()[0])/batch_size
     #
-    # new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
-    #
-    # loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
-    #
-    # nat_probs = F.softmax(logits, dim=1)
-    #
-    # true_probs = torch.gather(nat_probs, 1, (y.unsqueeze(1)).long()).squeeze()
-    #
-    # loss_robust = (1.0 / batch_size) * torch.sum(
-    #     torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
-    # loss = loss_adv + float(beta) * loss_robust
-    return loss
+    # return loss
+
+# def ensemble_mart_loss(model,
+#               x_natural,
+#               y,
+#               optimizer,
+#               emphasize_label=3,
+#               step_size=0.007,
+#               epsilon=0.031,
+#               perturb_steps=10,
+#               beta=6.0,
+#               distance='l_inf'):
+#     model.eval()
+#     batch_size = len(x_natural)
+#
+#     # divide data
+#     emphasize_data = x_natural.clone().detach()[y==emphasize_label]
+#     normal_data = x_natural.clone().detach()[y!=emphasize_label]
+#     emphasize_target = y.clone().detach()[y==emphasize_label]
+#     normal_target = y.clone().detach()[y!=emphasize_label]
+#     normal_targeted_label = normal_target.clone().detach()
+#     normal_targeted_label[:] = emphasize_label
+#
+#     # define adversary
+#     PGD_nontargted = LinfPGDAttack(model, eps=epsilon, nb_iter=perturb_steps, eps_iter=step_size,
+#                                   loss_fn=nn.CrossEntropyLoss(), rand_init=True,targeted=False)
+#
+#     # generate adversarial_example
+#     with ctx_noparamgrad_and_eval(model):
+#         adv_emphasize_data = PGD_nontargted.perturb(emphasize_data, emphasize_target) #对重要类别进行无目标攻击
+#         adv_normal_data = PGD_nontargted.perturb(normal_data, normal_target) #对重要类别进行无目标攻击
+#
+#     model.train()
+#     optimizer.zero_grad()
+#
+#     # normal part
+#     normal_output = model(adv_normal_data)
+#     normal_loss = _ce_loss(normal_output,normal_target)
+#     emphasize_softmax = F.softmax(normal_output,dim=1)
+#     emphasize_softmax = emphasize_softmax[:,emphasize_label]
+#
+#     # emphasize part
+#     emphasize_loss = _ce_loss(model(adv_emphasize_data),emphasize_target)
+#
+#     loss = (beta*emphasize_loss.sum() + normal_loss.sum())/batch_size + beta * emphasize_softmax.mean()
+#
+#     return loss
 
 def mart_loss(model,
               x_natural,
