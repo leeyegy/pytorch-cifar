@@ -58,7 +58,6 @@ args = parser.parse_args()
 
 # for wideres
 if args.net == "WideResNet":
-    args.epochs = 90
     args.weight_decay = 7e-4
     args.lr = 0.1
 
@@ -69,8 +68,10 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","mart_6_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "mart_6_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
+# save_path = os.path.join("checkpoint","mart_6_"+args.net,"234567_beta_"+str(args.beta))
+# exp_name = os.path.join("runs", "mart_6_"+args.net,"234567_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -101,7 +102,6 @@ print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
 
-
 # Data
 print('==> Preparing data..')
 # setup data loader
@@ -113,13 +113,21 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
+
+# init
+model_dict = net.state_dict()
+checkpoint = torch.load(os.path.join("checkpoint","mart_WideResNet","beta_6","ckpt.pth"))
+pretrained_dict = checkpoint['net']
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
+model_dict.update(pretrained_dict)
+net.load_state_dict(model_dict)
 
 assert not (args.resume_best and args.resume_last)
 
@@ -186,8 +194,6 @@ def test(epoch):
 
     adv_stat_correct = torch.zeros([6]).cuda()
     adv_stat_total = torch.zeros([6]).cuda()
-    # adv_stat_output = torch.zeros([6, 6]).cuda()
-    # adv_stat_shannon_total = torch.zeros([10]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -214,21 +220,15 @@ def test(epoch):
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
-        # _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
 
 
         progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
-    # adv_stat_output /= adv_stat_shannon_total
-    # adv_entropy = _calculate_information_entropy(adv_stat_output)
-
-    # #monitor shannon - class level
-    # writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
 
     #monitor acc - class level
-    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(6)},epoch)
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(4)},epoch)
 
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
@@ -244,7 +244,7 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt-{}.pth'.format(epoch)))
+        torch.save(state, os.path.join(save_path,'ckpt.pth'.format(epoch)))
         best_acc = acc
     if epoch == args.epochs-1:
         print('Saving Last..')
@@ -257,30 +257,41 @@ def test(epoch):
             os.mkdir('checkpoint')
         torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
 
+# def adjust_learning_rate(optimizer, epoch):
+#     """decrease the learning rate"""
+#     lr = args.lr
+#     if epoch >= 25:
+#         lr = args.lr * 0.001
+#     elif epoch >= 15:
+#         lr = args.lr * 0.01
+#     elif epoch >= 10:
+#         lr = args.lr * 0.1
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
+#
+def adjust_learning_rate(optimizer, epoch):
+    """decrease the learning rate"""
+    lr = args.lr
+    if epoch >= 50:
+        lr = args.lr * 0.001
+    elif epoch >= 40:
+        lr = args.lr * 0.01
+    elif epoch >= 30:
+        lr = args.lr * 0.1
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 # def adjust_learning_rate(optimizer, epoch):
 #     """decrease the learning rate"""
 #     lr = args.lr
-#     if epoch >= 50:
+#     if epoch >= 100:
 #         lr = args.lr * 0.001
-#     elif epoch >= 40:
+#     elif epoch >= 90:
 #         lr = args.lr * 0.01
-#     elif epoch >= 30:
+#     elif epoch >= 75:
 #         lr = args.lr * 0.1
 #     for param_group in optimizer.param_groups:
 #         param_group['lr'] = lr
-
-def adjust_learning_rate(optimizer, epoch):
-    """decrease the learning rate"""
-    lr = args.lr
-    if epoch >= 100:
-        lr = args.lr * 0.001
-    elif epoch >= 90:
-        lr = args.lr * 0.01
-    elif epoch >= 75:
-        lr = args.lr * 0.1
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
 
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)

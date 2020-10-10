@@ -1,4 +1,4 @@
-for net in ResNet18
+for net in WideResNet
 do
 	for beta in 6.0
 	do

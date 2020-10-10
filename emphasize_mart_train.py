@@ -54,7 +54,7 @@ parser.add_argument('--resume_last', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--resume_init', default="checkpoint/mart_ResNet18/beta_6/ckpt.pth", type=str,
+parser.add_argument('--resume_init', default="checkpoint/mart_WideResNet/beta_6/ckpt.pth", type=str,
                     help='resume from checkpoint')
 parser.add_argument('--emphasize-label', default=3,type=int)
 args = parser.parse_args()
@@ -118,9 +118,9 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':

@@ -1,6 +1,6 @@
 for beta in 6.0
 do
-	for net in ResNet18
+	for net in WideResNet
 	do
 		for king in 0 1 2 3 4 5 6 7 8 9
 		do
