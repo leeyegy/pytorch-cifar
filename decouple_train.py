@@ -97,6 +97,7 @@ net_dict = {"VGG19":VGG('VGG19'),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF(),
             "WideResNet":WideResNet(),
+            "ResNet18":ResNet18()
 }
 
 # Model
@@ -134,6 +135,7 @@ pretrained_dict = checkpoint['net']
 pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
 model_dict.update(pretrained_dict)
 net.load_state_dict(model_dict)
+# print(net)
 
 assert not (args.resume_best and args.resume_last)
 
