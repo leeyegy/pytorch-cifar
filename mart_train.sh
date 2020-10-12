@@ -1,10 +1,10 @@
-for beta in 6.0
+for beta in 5.0
 do
-	for net in WideResNet
+	for net in HBPNet
 	do
-		for epoch in 50
+		for epoch in 120
 		do
-	python mart_train.py --epochs $epoch --net $net  --beta $beta --epsilon 0.03137 | tee log/mart_training/whole_234567_$epoch\_beta_$beta\_$net\_0.03137.txt
+	python mart_train.py --epochs $epoch --net $net  --beta $beta --epsilon 0.03137 | tee log/mart_training/$net/beta_$beta\_0.03137.txt
 done
 done
 done

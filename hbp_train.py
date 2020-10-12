@@ -22,7 +22,6 @@ from autoattack import AutoAttack
 
 
 
-
 parser = argparse.ArgumentParser(description='PyTorch CIFAR MART Defense')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
@@ -69,12 +68,10 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-# save_path = os.path.join("checkpoint","mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
-# exp_name = os.path.join("runs", "mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
 # save_path = os.path.join("checkpoint","mart_6_"+args.net,"234567_beta_"+str(args.beta))
 # exp_name = os.path.join("runs", "mart_6_"+args.net,"234567_beta_"+str(args.beta))
-save_path = os.path.join("checkpoint","mart_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "mart_"+args.net,"beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -97,8 +94,7 @@ net_dict = {"VGG19":VGG('VGG19'),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF(),
-            "WideResNet":WideResNet(),
-            "HBPNet":HBPNet()
+            "WideResNet":WideResNet()
 }
 
 # Model
@@ -125,13 +121,13 @@ test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_si
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
 
-# # init
-# model_dict = net.state_dict()
-# checkpoint = torch.load(os.path.join("checkpoint","mart_WideResNet","beta_6","ckpt.pth"))
-# pretrained_dict = checkpoint['net']
-# pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
-# model_dict.update(pretrained_dict)
-# net.load_state_dict(model_dict)
+# init
+model_dict = net.state_dict()
+checkpoint = torch.load(os.path.join("checkpoint","mart_WideResNet","beta_6","ckpt.pth"))
+pretrained_dict = checkpoint['net']
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
+model_dict.update(pretrained_dict)
+net.load_state_dict(model_dict)
 
 assert not (args.resume_best and args.resume_last)
 
@@ -162,13 +158,12 @@ def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        print(model(data).size())
-        #
-        # # filter out
-        # mask = (target<8) & (target>1)
-        # data = data[mask]
-        # target = target[mask]
-        # target -= 2
+
+        # filter out
+        mask = (target<8) & (target>1)
+        data = data[mask]
+        target = target[mask]
+        target -= 2
 
         optimizer.zero_grad()
 
@@ -203,11 +198,11 @@ def test(epoch):
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
 
-        # # filter out
-        # mask = (targets<8) & (targets>1)
-        # inputs = inputs[mask]
-        # targets = targets[mask]
-        # targets -= 2
+        # filter out
+        mask = (targets<8) & (targets>1)
+        inputs = inputs[mask]
+        targets = targets[mask]
+        targets -= 2
 
         with torch.no_grad():
             outputs = net(inputs)
@@ -274,29 +269,29 @@ def test(epoch):
 #     for param_group in optimizer.param_groups:
 #         param_group['lr'] = lr
 #
-# def adjust_learning_rate(optimizer, epoch):
-#     """decrease the learning rate"""
-#     lr = args.lr
-#     if epoch >= 50:
-#         lr = args.lr * 0.001
-#     elif epoch >= 40:
-#         lr = args.lr * 0.01
-#     elif epoch >= 30:
-#         lr = args.lr * 0.1
-#     for param_group in optimizer.param_groups:
-#         param_group['lr'] = lr
-
 def adjust_learning_rate(optimizer, epoch):
     """decrease the learning rate"""
     lr = args.lr
-    if epoch >= 100:
+    if epoch >= 50:
         lr = args.lr * 0.001
-    elif epoch >= 90:
+    elif epoch >= 40:
         lr = args.lr * 0.01
-    elif epoch >= 75:
+    elif epoch >= 30:
         lr = args.lr * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+# def adjust_learning_rate(optimizer, epoch):
+#     """decrease the learning rate"""
+#     lr = args.lr
+#     if epoch >= 100:
+#         lr = args.lr * 0.001
+#     elif epoch >= 90:
+#         lr = args.lr * 0.01
+#     elif epoch >= 75:
+#         lr = args.lr * 0.1
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
 
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)

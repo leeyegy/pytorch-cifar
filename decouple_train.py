@@ -19,7 +19,7 @@ from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
 from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
 from autoattack import AutoAttack
-
+from attack.PGDAttack import  *
 
 
 
@@ -48,13 +48,15 @@ parser.add_argument('--beta', default=5.0,
                     help='weight before kl (misclassified examples)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
-parser.add_argument("--net",default="ResNet18",type=str)
+parser.add_argument("--net",default="ResNet18_Representation",type=str)
 parser.add_argument('--resume_best', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--resume_last', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
+
+parser.add_argument("--mode",type=str,default="representation",choices=["representation","classifier"])
 args = parser.parse_args()
 
 # for wideres
@@ -67,14 +69,11 @@ device ='cuda' if torch.cuda.is_available() else 'cpu'
 kwargs = {'num_workers': 10, 'pin_memory': True}
 torch.backends.cudnn.benchmark = True
 
-best_acc = 0  # best test accuracy
+best_acc = 1-0.05656  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-# save_path = os.path.join("checkpoint","mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
-# exp_name = os.path.join("runs", "mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
-# save_path = os.path.join("checkpoint","mart_6_"+args.net,"234567_beta_"+str(args.beta))
-# exp_name = os.path.join("runs", "mart_6_"+args.net,"234567_beta_"+str(args.beta))
-save_path = os.path.join("checkpoint","mart_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "mart_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,"debuged_"+args.mode)
+exp_name = os.path.join("runs", "decouple_"+args.net,"debuged_"+args.mode)
+
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -83,7 +82,7 @@ writer = SummaryWriter(exp_name)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
-            "ResNet18": ResNet18(num_classes=6),
+            "ResNet18_Representation": ResNet18_Representation(),
             "ResNet18_cosine":ResNet18_cosine(),
             "PreActResNet18": PreActResNet18(),
             "GoogLeNet":GoogLeNet(),
@@ -98,7 +97,6 @@ net_dict = {"VGG19":VGG('VGG19'),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF(),
             "WideResNet":WideResNet(),
-            "HBPNet":HBPNet()
 }
 
 # Model
@@ -125,13 +123,17 @@ test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_si
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
 
-# # init
-# model_dict = net.state_dict()
-# checkpoint = torch.load(os.path.join("checkpoint","mart_WideResNet","beta_6","ckpt.pth"))
-# pretrained_dict = checkpoint['net']
-# pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
-# model_dict.update(pretrained_dict)
-# net.load_state_dict(model_dict)
+# init
+representation_init = os.path.join("checkpoint","mart_ResNet18","beta_6","ckpt.pth")
+classifier_init = os.path.join("checkpoint","decouple_ResNet18_Representation","ckpt.pth")
+init_path = representation_init if args.mode == "representation" else classifier_init
+
+model_dict = net.state_dict()
+checkpoint = torch.load(init_path)
+pretrained_dict = checkpoint['net']
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
+model_dict.update(pretrained_dict)
+net.load_state_dict(model_dict)
 
 assert not (args.resume_best and args.resume_last)
 
@@ -157,19 +159,50 @@ if args.resume_last:
 #define adversary
 PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
+adversary = MSEAttack(net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10)
 
-def train(args, model, device, train_loader, optimizer, epoch):
+
+def freeze(model, train_mode="classifier"):
+    if train_mode == "classifier":
+        # 冻结非linear的参数
+        for name, param in model.named_parameters():
+            if "linear" in name:
+                param.require_grads = True
+            else:
+                param.require_grads = False
+    elif train_mode == "representation":
+        # 冻结linear的参数
+        for name, param in model.named_parameters():
+            if "linear" in name:
+                param.require_grads = False
+            else:
+                param.require_grads = True
+    else:
+        raise
+
+def train_representation(args, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        print(model(data).size())
-        #
-        # # filter out
-        # mask = (target<8) & (target>1)
-        # data = data[mask]
-        # target = target[mask]
-        # target -= 2
 
+        # generate adv
+        x_adv = adversary.perturb(data, target)
+        model.train()
+
+        # 优化表征器部件- triple loss <adv,cln,another_adv> - 只优化表征器部分参数
+        optimizer.zero_grad()
+        loss = representation_loss(model,x_natural=data,x_adv=x_adv,y=target)
+        loss.backward()
+        optimizer.step()
+
+        # print progress
+        progress_bar(batch_idx, len(train_loader), 'representation loss: %.3f'
+                     % (loss.item()))
+
+def train_classifier(args, model, device, train_loader, optimizer, epoch):
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
 
         # calculate robust loss
@@ -190,25 +223,18 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader), loss.item()))
 
-def test(epoch):
+def test_classifier(epoch):
     global best_acc
     net.eval()
     pgd_correct = 0
     correct = 0
     total = 0
 
-    adv_stat_correct = torch.zeros([6]).cuda()
-    adv_stat_total = torch.zeros([6]).cuda()
+    adv_stat_correct = torch.zeros([10]).cuda()
+    adv_stat_total = torch.zeros([10]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
-
-        # # filter out
-        # mask = (targets<8) & (targets>1)
-        # inputs = inputs[mask]
-        # targets = targets[mask]
-        # targets -= 2
-
         with torch.no_grad():
             outputs = net(inputs)
         total += targets.size(0)
@@ -216,7 +242,6 @@ def test(epoch):
 
         with ctx_noparamgrad_and_eval(net):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
-        # pgd_data = AA_adversary.run_standard_evaluation(inputs, targets, bs=args.test_batch_size)
 
         with torch.no_grad():
             outputs = net(pgd_data)
@@ -233,13 +258,65 @@ def test(epoch):
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
 
     #monitor acc - class level
-    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(4)},epoch)
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
 
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
 
     # Save checkpoint.
     acc = 100.*pgd_correct/total
+    if acc > best_acc:
+        print('Saving..')
+        state = {
+            'net': net.state_dict(),
+            'acc': acc,
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        torch.save(state, os.path.join(save_path,'ckpt.pth'.format(epoch)))
+        best_acc = acc
+    if epoch == args.epochs-1:
+        print('Saving Last..')
+        state = {
+            'net': net.state_dict(),
+            'acc': acc,
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
+
+def test_representation(epoch):
+    global best_acc
+    net.eval()
+    pgd_correct = 0
+    correct = 0
+    total = 0
+
+    adv_stat_correct = torch.zeros([6]).cuda()
+    adv_stat_total = torch.zeros([6]).cuda()
+    dis = 0
+
+    for batch_idx, (inputs, targets) in enumerate(test_loader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        with torch.no_grad():
+            cln_feature = net(inputs)
+        total += targets.size(0)
+
+        # with ctx_noparamgrad_and_eval(net):
+        #     pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
+        # pgd_data = AA_adversary.run_standard_evaluation(inputs, targets, bs=args.test_batch_size)
+        pgd_data = adversary.perturb(inputs, targets)
+
+        with torch.no_grad():
+            adv_feature = net(pgd_data)
+        dis += (1 - F.cosine_similarity(cln_feature, adv_feature)).sum()
+
+        progress_bar(batch_idx, len(test_loader), 'avg dis: %.3f'
+                     % (dis/total))
+
+    acc = 1 - dis/total
     if acc > best_acc:
         print('Saving..')
         state = {
@@ -298,11 +375,25 @@ def adjust_learning_rate(optimizer, epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
+if args.mode == "classifier":
+    print("training mode : classifier")
+    freeze(net, train_mode="classifier")
+elif args.mode == "representation":
+    print("training mode : representation")
+    freeze(net, train_mode="representation")
+
+
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
+# optimizer = optim.SGD(net.parameters(), lr=args.lr,
+#                       momentum=args.momentum, weight_decay=args.weight_decay)
 
 for epoch in range(start_epoch, args.epochs):
     adjust_learning_rate(optimizer,epoch)
-    train(args, net, device, train_loader, optimizer, epoch)
-    test(epoch)
+    if args.mode == "classifier":
+        train_classifier(args, net, device, train_loader, optimizer, epoch)
+        test_classifier(epoch)
+    elif args.mode == "representation":
+        train_representation(args, net, device, train_loader, optimizer, epoch)
+        test_representation(epoch)
     writer.close()

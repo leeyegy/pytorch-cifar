@@ -41,8 +41,9 @@ net_dict = {"VGG19":VGG('VGG19'),
             "SENet18":SENet18(),
             "ShuffleNetV2":ShuffleNetV2(1),
             "EfficientNetB0":EfficientNetB0(),
-            "RegNetX_200MF":RegNetX_200MF()
-}
+            "RegNetX_200MF":RegNetX_200MF(),
+            "WideResNet": WideResNet()
+            }
 
 # Data
 print('==> Preparing data..')
@@ -74,7 +75,8 @@ print('==> Building model..')
 net = net_dict[args.net]
 net = net.to(device)
 
-net_6 = ResNet18(num_classes=6)
+# net_6 = ResNet18(num_classes=6)
+net_6 = WideResNet()
 net_6 = net_6.to(device)
 
 if device == 'cuda':
@@ -83,11 +85,11 @@ if device == 'cuda':
     cudnn.benchmark = True
 
 # resume
-checkpoint = torch.load(os.path.join("checkpoint","mart_ResNet18","beta_6","ckpt.pth"))
+checkpoint = torch.load(os.path.join("checkpoint","mart_WideResNet","beta_6","ckpt.pth"))
 net.load_state_dict(checkpoint['net'])
 start_epoch = checkpoint['epoch']
 
-checkpoint = torch.load(os.path.join("checkpoint","mart_6_ResNet18","50epoch_whole_234567_beta_6.0","ckpt.pth"))
+checkpoint = torch.load(os.path.join("checkpoint","mart_6_WideResNet","30epoch_whole_234567_beta_6.0","ckpt.pth"))
 net_6.load_state_dict(checkpoint['net'])
 
 criterion = nn.CrossEntropyLoss()

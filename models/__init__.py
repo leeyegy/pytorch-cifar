@@ -16,3 +16,4 @@ from .efficientnet import *
 from .regnet import *
 from .resnet_dbn import  *
 from .wideresnet import *
+from .hbp import  *
