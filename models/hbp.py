@@ -45,47 +45,54 @@ class HBPNet(nn.Module):
 
     def forward(self, x):
         batch_size = x.size(0)
-        feature4_0, feature4_1, feature4_2 = self.features(x)
+        feature4_0, feature4_1 = self.features(x)
         print(0)
         print(feature4_0.size())
         print(feature4_1.size())
-        print(feature4_2.size())
+        # print(feature4_2.size())
 
         feature4_0 = self.proj0(feature4_0)
         feature4_1 = self.proj1(feature4_1)
-        feature4_2 = self.proj2(feature4_2)
+        # feature4_2 = self.proj2(feature4_2)
 
         print(1)
         print(feature4_0.size())
         print(feature4_1.size())
-        print(feature4_2.size())
+        # print(feature4_2.size())
 
         inter1 = feature4_0 * feature4_1
-        inter2 = feature4_0 * feature4_2
-        inter3 = feature4_1 * feature4_2
+        # inter2 = feature4_0 * feature4_2
+        # inter3 = feature4_1 * feature4_2
 
         print(2)
         print(inter1.size())
-        print(inter2.size())
-        print(inter3.size())
+        # print(inter2.size())
+        # print(inter3.size())
 
-        inter1 = self.avgpool(inter1).view(batch_size, -1)
-        inter2 = self.avgpool(inter2).view(batch_size, -1)
-        inter3 = self.avgpool(inter3).view(batch_size, -1)
+        # out = F.avg_pool2d(out, 4)
+        # out = out.view(out.size(0), -1)
+        # out = self.linear(out)
+        inter1 = F.avg_pool2d(inter1,4).view(batch_size, -1)
+        # inter2 = F.avg_pool2d(inter2,4).view(batch_size, -1)
+        # inter3 = F.avg_pool2d(inter3,4).view(batch_size, -1)
+
+        # inter1 = self.avgpool(inter1).view(batch_size, -1)
+        # inter2 = self.avgpool(inter2).view(batch_size, -1)
+        # inter3 = self.avgpool(inter3).view(batch_size, -1)
 
         print(3)
         print(inter1.size())
-        print(inter2.size())
-        print(inter3.size())
+        # print(inter2.size())
+        # print(inter3.size())
 
         result1 = torch.nn.functional.normalize(torch.sign(inter1) * torch.sqrt(torch.abs(inter1) + 1e-10))
-        result2 = torch.nn.functional.normalize(torch.sign(inter2) * torch.sqrt(torch.abs(inter2) + 1e-10))
-        result3 = torch.nn.functional.normalize(torch.sign(inter3) * torch.sqrt(torch.abs(inter3) + 1e-10))
+        # result2 = torch.nn.functional.normalize(torch.sign(inter2) * torch.sqrt(torch.abs(inter2) + 1e-10))
+        # result3 = torch.nn.functional.normalize(torch.sign(inter3) * torch.sqrt(torch.abs(inter3) + 1e-10))
 
         print(4)
         print(inter1.size())
-        print(inter2.size())
-        print(inter3.size())
+        # print(inter2.size())
+        # print(inter3.size())
 
         print(5)
         result = torch.cat((result1, result2, result3), 1)

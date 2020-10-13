@@ -598,7 +598,6 @@ def representation_loss(model,x_natural,x_adv,y):
     # cosine_dis<x_adv,x_cln> + cosine_dis<x_adv,another_x_adv>
     cln_feature,_ = model(x_natural)
     adv_feature,_ = model(x_adv)
-    print(cln_feature.size())
     loss = torch.ones(x_natural.size()[0]).to(x_natural)
     cosine_sim_self = F.cosine_similarity(cln_feature, adv_feature)
 

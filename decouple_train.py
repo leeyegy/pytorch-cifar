@@ -115,9 +115,9 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
@@ -224,7 +224,7 @@ def test(epoch):
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
         with torch.no_grad():
-            outputs = net(inputs)
+            _,outputs = net(inputs)
         total += targets.size(0)
         correct += get_correct_num(outputs,targets,"CE")
 
@@ -232,7 +232,7 @@ def test(epoch):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
 
         with torch.no_grad():
-            outputs = net(pgd_data)
+            _,outputs = net(pgd_data)
         pgd_correct += get_correct_num(outputs,targets,"CE")
 
         # for tensorboard
@@ -262,7 +262,7 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'.format(epoch)))
+        torch.save(state, os.path.join(save_path,'ckpt.pth'))
         best_acc = acc
     if epoch == args.epochs-1:
         print('Saving Last..')
@@ -277,7 +277,6 @@ def test(epoch):
 
 # define optimizer
 freeze(net,train_mode="classifier")
-print(filter(lambda p: p.requires_grad, net.parameters())) # debug test
 classifier_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 freeze(net,train_mode="representation")

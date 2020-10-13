@@ -106,7 +106,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, isAttn=True)
         self.layer4_0 = self._make_layer4(block, 512, stride=2, flag=True)
         self.layer4_1 = self._make_layer4(block, 512, stride=1, flag=True)
-        self.layer4_2 = self._make_layer4(block, 512, stride=1, flag=False)
+        # self.layer4_2 = self._make_layer4(block, 512, stride=1, flag=False)
 
 
 
@@ -153,9 +153,10 @@ class ResNet(nn.Module):
         x, fea3 = self.layer3(x)
         x, fea4_0 = self.layer4_0(x)
         x, fea4_1 = self.layer4_1(x)
-        fea4_2 = self.layer4_2(x)
+        # fea4_2 = self.layer4_2(x)
 
-        return fea4_0, fea4_1, fea4_2
+        # return fea4_0, fea4_1, fea4_2
+        return fea4_0, fea4_1
 
 
 
