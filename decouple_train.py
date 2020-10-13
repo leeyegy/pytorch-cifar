@@ -44,7 +44,7 @@ parser.add_argument('--num-steps', default=10,
                     help='perturb number of steps')
 parser.add_argument('--step-size', default=0.007,
                     help='perturb step size')
-parser.add_argument('--beta', default=5.0,
+parser.add_argument('--beta', default=5.0,type=float,
                     help='weight before kl (misclassified examples)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
@@ -71,9 +71,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 1-0.05656  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,"debuged_"+args.mode)
-exp_name = os.path.join("runs", "decouple_"+args.net,"debuged_"+args.mode)
-
+save_path = os.path.join("checkpoint","decouple_"+args.net,"debuged_"+args.mode,"beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,"debuged_"+args.mode,"beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
