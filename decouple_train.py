@@ -171,9 +171,7 @@ def freeze(model, train_mode="classifier"):
             if "linear" in name:
                 param.requires_grad = True
             else:
-                print("禁用参数:{}".format(name))
                 param.requires_grad = False
-                print(param.requires_grad)
     elif train_mode == "representation":
         # 冻结linear的参数
         for name, param in model.named_parameters():
@@ -195,14 +193,14 @@ def train(args, model, device, train_loader, classifier_optimizer,representation
 
         # optimize representation
         representation_optimizer.zero_grad()
-        freeze(model,mode="representation")
+        freeze(model,train_mode="representation")
         loss_ = representation_loss(model,data,adv_data,target)
         loss_.backward()
         representation_optimizer.step()
 
         # optimize classifier
         classifier_optimizer.zero_grad()
-        freeze(model,mode="classifier")
+        freeze(model,train_mode="classifier")
         loss = classifier_loss(model,data,adv_data,target,args.beta)
         loss.backward()
         classifier_optimizer.step()
@@ -278,11 +276,11 @@ def test(epoch):
         torch.save(state, os.path.join(save_path, 'ckpt-{}.pth'.format(epoch)))
 
 # define optimizer
-freeze(net,mode="classifier")
+freeze(net,train_mode="classifier")
 print(filter(lambda p: p.requires_grad, net.parameters())) # debug test
 classifier_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
-freeze(net,mode="representation")
+freeze(net,train_mode="representation")
 representation_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 
