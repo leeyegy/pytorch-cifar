@@ -2,6 +2,31 @@ import torch
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss
 
+class PGD():
+    def __init__(self,model,eps,perturb_steps,step_size):
+        super(PGD,self).__init__()
+        self.model = model
+        self.epsilon = eps
+        self.perturb_steps = perturb_steps
+        self.step_size = step_size
+        self.loss = F.cross_entropy
+
+    def perturb(self,x_natural,y):
+        self.model.eval()
+        x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+
+        for _ in range(self.perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                _,output = self.model(x_adv)
+                loss = self.loss(output,y)
+            grad = torch.autograd.grad(loss, [x_adv])[0]
+            x_adv = x_adv.detach() + self.step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - self.epsilon), x_natural + self.epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+        return x_adv.clone().detach()
+
 class sum_squared_error(_Loss):  # PyTorch 0.4.1
     """
     Definition: sum_squared_error = 1/2 * nn.MSELoss(reduction = 'sum')

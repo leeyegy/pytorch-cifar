@@ -596,12 +596,13 @@ def _ce_loss(output,target):
 def representation_loss(model,x_natural,x_adv,y):
     batch_size = len(x_natural)
     # cosine_dis<x_adv,x_cln> + cosine_dis<x_adv,another_x_adv>
-    cln_feature = model(x_natural)
-    adv_feature = model(x_adv)
+    cln_feature,_ = model(x_natural)
+    adv_feature,_ = model(x_adv)
+    print(cln_feature.size())
     loss = torch.ones(x_natural.size()[0]).to(x_natural)
     cosine_sim_self = F.cosine_similarity(cln_feature, adv_feature)
-    print()
-    #随机抽样一个不同target的对抗样本
+
+    # random sample a adv_img whose target is different
     for i in range(batch_size):
         # random sample
         sample_idx = random.randint(0,batch_size-1)
@@ -610,6 +611,29 @@ def representation_loss(model,x_natural,x_adv,y):
         cosine_sim_others = F.cosine_similarity(torch.unsqueeze(adv_feature[i],0),torch.unsqueeze(adv_feature[sample_idx],0))
         loss[i] = cosine_sim_others - cosine_sim_self[i] + 2
     return loss.mean()
+
+def classifier_loss(model,x_natural,x_adv,y,beta):
+    kl = nn.KLDivLoss(reduction='none')
+    batch_size = len(x_natural)
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    _,logits = model(x_natural)
+    _,logits_adv = model(x_adv)
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
+
+    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    nat_probs = F.softmax(logits, dim=1)
+    true_probs = torch.gather(nat_probs, 1, (y.unsqueeze(1)).long()).squeeze()
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+    loss = loss_adv + float(beta) * loss_robust
+
+    return loss
 
 def ensemble_mart_loss(model,
               x_natural,
