@@ -20,6 +20,7 @@ from tensorboardX import SummaryWriter
 from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
 from autoattack import AutoAttack
 from attack.PGDAttack import  *
+from loss import  _mart_loss ,_madry_loss
 
 
 
@@ -55,6 +56,7 @@ parser.add_argument('--resume_last', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
+parser.add_argument("--classify-loss",type=str,default="mart")
 
 args = parser.parse_args()
 
@@ -70,8 +72,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,args.classify_loss+"_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,args.classify_loss+"_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -98,6 +100,12 @@ net_dict = {"VGG19":VGG('VGG19'),
             "ResNet18":ResNet18(),
             "Decouple18":Decouple18()
 }
+
+# loss dict
+loss_dict = {"mart":_mart_loss,
+             "madry":_madry_loss,}
+
+classifier_loss = loss_dict[args.classify_loss]
 
 # Model
 print('==> Building model..')

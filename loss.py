@@ -611,7 +611,14 @@ def representation_loss(model,x_natural,x_adv,y):
         loss[i] = cosine_sim_others - cosine_sim_self[i] + 2
     return loss.mean()
 
-def classifier_loss(model,x_natural,x_adv,y,beta):
+def _madry_loss(model,x_natural,x_adv,y,beta):
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    _,logits_adv = model(x_adv)
+    loss_adv = F.cross_entropy(logits_adv, y)
+    return loss_adv
+
+
+def _mart_loss(model,x_natural,x_adv,y,beta):
     kl = nn.KLDivLoss(reduction='none')
     batch_size = len(x_natural)
 

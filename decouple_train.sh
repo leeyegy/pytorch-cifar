@@ -3,8 +3,11 @@ do
 		for epochs in 120
 		do
 		       for beta in 6
-		       do 	       
-			python decouple_train.py --beta $beta --net $net --epochs $epochs  | tee log/decouple_training/beta_$beta\_$epochs\_$net.txt
+		       do
+		for class in madry
+		do 		
+			python decouple_train.py --classify-loss $class  --beta $beta --net $net --epochs $epochs  | tee log/decouple_training/classify_$class\_beta_$beta\_$epochs\_$net.txt
 		done
 		done
 	done
+done
