@@ -135,7 +135,6 @@ pretrained_dict = checkpoint['net']
 pretrained_dict = {k: v for k, v in pretrained_dict.items() if not ("linear" in k )}
 model_dict.update(pretrained_dict)
 net.load_state_dict(model_dict)
-# print(net)
 
 assert not (args.resume_best and args.resume_last)
 
@@ -169,18 +168,21 @@ def freeze(model, train_mode="classifier"):
         # 冻结非linear的参数
         for name, param in model.named_parameters():
             if "linear" in name:
-                param.require_grads = True
+                param.requires_grad = True
             else:
-                param.require_grads = False
+                print("禁用参数:{}".format(name))
+                param.requires_grad = False
+                print(param.requires_grad)
     elif train_mode == "representation":
         # 冻结linear的参数
         for name, param in model.named_parameters():
             if "linear" in name:
-                param.require_grads = False
+                param.requires_grad = False
             else:
-                param.require_grads = True
+                param.requires_grad = True
     else:
         raise
+    return model
 
 def train_representation(args, model, device, train_loader, optimizer, epoch):
     model.train()
@@ -379,18 +381,16 @@ def adjust_learning_rate(optimizer, epoch):
 
 if args.mode == "classifier":
     print("training mode : classifier")
-    freeze(net, train_mode="classifier")
+    net = freeze(net, train_mode="classifier")
 elif args.mode == "representation":
     print("training mode : representation")
-    freeze(net, train_mode="representation")
-
+    net = freeze(net, train_mode="representation")
 
 optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
-# optimizer = optim.SGD(net.parameters(), lr=args.lr,
-#                       momentum=args.momentum, weight_decay=args.weight_decay)
 
 for epoch in range(start_epoch, args.epochs):
+    print("==========Epoch:{}===========".format(epoch))
     adjust_learning_rate(optimizer,epoch)
     if args.mode == "classifier":
         train_classifier(args, net, device, train_loader, optimizer, epoch)
