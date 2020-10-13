@@ -72,8 +72,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,args.classify_loss+"_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,args.classify_loss+"_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,args.classify_loss+"_all_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,args.classify_loss+"_all_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -176,10 +176,11 @@ def freeze(model, train_mode="classifier"):
     if train_mode == "classifier":
         # 冻结非linear的参数
         for name, param in model.named_parameters():
-            if "linear" in name:
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
+            param.requires_grad = True # train all layer
+            # if "linear" in name:
+            #     param.requires_grad = True
+            # else:
+            #     param.requires_grad = False
     elif train_mode == "representation":
         # 冻结linear的参数
         for name, param in model.named_parameters():
@@ -287,6 +288,7 @@ def test(epoch):
 freeze(net,train_mode="classifier")
 classifier_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
+
 freeze(net,train_mode="representation")
 representation_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
