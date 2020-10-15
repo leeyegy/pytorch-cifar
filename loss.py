@@ -340,7 +340,7 @@ def advanced_trades_whole_loss(model,
     loss = ((loss_clean + float(beta) * loss_robust ) * ((1.0000001 - true_adv_probs) ** gamma)).mean()
     return loss # 在amart_train文件下跑的atrades版本没有对loss_clean也进行加权
 
-
+# 更改之后的版本，之前的版本对clean部分也会进行加权
 def advanced_trades_loss(model,
               x_natural,
               y,
@@ -385,8 +385,8 @@ def advanced_trades_loss(model,
 
     loss_robust = (1.0 / batch_size) * torch.sum(
         torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * ((1.0000001 - true_adv_probs) ** gamma))
-    loss = (loss_clean*((1.0000001 - true_cln_probs)**gamma)).mean() + float(beta) * loss_robust
-    return loss # 在amart_train文件下跑的atrades版本没有对loss_clean也进行加权
+    loss = loss_clean + float(beta) * loss_robust
+    return loss
 
 def mart_topk_loss(model,
               x_natural,

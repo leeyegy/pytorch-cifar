@@ -289,5 +289,4 @@ for epoch in range(start_epoch, 120):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
-    # break
     writer.close()
