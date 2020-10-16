@@ -227,18 +227,18 @@ def test(epoch):
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
-        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
+        # _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
 
 
         progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
-    adv_stat_output /= adv_stat_shannon_total
-    adv_entropy = _calculate_information_entropy(adv_stat_output)
+    # adv_stat_output /= adv_stat_shannon_total
+    # adv_entropy = _calculate_information_entropy(adv_stat_output)
 
     #monitor shannon - class level
-    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+    # writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
 
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)

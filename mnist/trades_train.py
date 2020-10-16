@@ -65,8 +65,8 @@ torch.backends.cudnn.benchmark = True
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
-save_path = os.path.join("checkpoint","mnist","trades_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs","mnist" ,"trades_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("../checkpoint","mnist","trades_"+args.net,"beta_"+str(args.beta))
+exp_name = os.path.join("../runs","mnist" ,"trades_"+args.net,"beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
