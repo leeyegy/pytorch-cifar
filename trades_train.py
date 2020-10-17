@@ -65,8 +65,8 @@ torch.backends.cudnn.benchmark = True
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
-save_path = os.path.join("checkpoint","trades_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "trades_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","hem_trades_"+args.net,"beta_"+str(args.beta))
+exp_name = os.path.join("runs", "hem_trades_"+args.net,"beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -108,9 +108,9 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
@@ -143,22 +143,55 @@ PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsi
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+
+    # define hard example pool
+    hard_natural = torch.ones([args.batch_size, 3, 32, 32]).to(device)
+    hard_count = 0
+    hard_y = torch.zeros([args.batch_size, 1]).to(device)
+
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = trades_loss(model=model,
-                           x_natural=data,
-                           y=target,
-                           optimizer=optimizer,
-                           step_size=args.step_size,
-                           epsilon=args.epsilon,
-                           perturb_steps=args.num_steps,
-                           beta=args.beta)
+        true_adv_probs, loss = trades_loss(model=model,
+                                           x_natural=data,
+                                           y=target,
+                                           optimizer=optimizer,
+                                           step_size=args.step_size,
+                                           epsilon=args.epsilon,
+                                           perturb_steps=args.num_steps,
+                                           beta=args.beta)
         loss.backward()
         optimizer.step()
+
+        # put the max 128/8 loss
+        print(true_adv_probs.size())
+        _, index = torch.sort(true_adv_probs)
+        hard_natural[hard_count:hard_count + 16] = data[index[0:16]].clone().detach()
+        hard_y[hard_count:hard_count + 16] = y[index[0:16]].clone().detach()
+
+        # update hard_count
+        hard_count += 16
+
+        if hard_count >= args.batch_size:
+            optimizer.zero_grad()
+
+            # calculate robust loss
+            _, loss = trades_loss(model=model,
+                                  x_natural=hard_natural,
+                                  y=hard_y,
+                                  optimizer=optimizer,
+                                  step_size=args.step_size,
+                                  epsilon=args.epsilon,
+                                  perturb_steps=args.num_steps,
+                                  beta=args.beta)
+            loss.backward()
+            optimizer.step()
+
+            # reset hard_count
+            hard_count = 0
 
         # print progress
         if batch_idx % args.log_interval == 0:
