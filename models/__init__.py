@@ -18,3 +18,5 @@ from .resnet_dbn import  *
 from .wideresnet import *
 from .hbp import  *
 from .small_cnn import  *
+from .aa_wideresnet import *
+from .resnet_cbam import *

@@ -8,6 +8,7 @@ import torchvision
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
+from torchvision.datasets import ImageFolder
 
 from models import *
 from utils import  progress_bar
@@ -55,6 +56,7 @@ parser.add_argument('--resume_last', default=False, action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
+parser.add_argument("--low_mode",type=str,default="low_16")
 args = parser.parse_args()
 
 # for wideres
@@ -73,8 +75,8 @@ start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 # exp_name = os.path.join("runs", "mart_6_"+args.net,"50epoch_whole_234567_beta_"+str(args.beta))
 # save_path = os.path.join("checkpoint","mart_6_"+args.net,"234567_beta_"+str(args.beta))
 # exp_name = os.path.join("runs", "mart_6_"+args.net,"234567_beta_"+str(args.beta))
-save_path = os.path.join("checkpoint","mart_"+args.net,"beta_"+str(args.beta))
-exp_name = os.path.join("runs", "mart_"+args.net,"beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","mart_"+args.net,args.low_mode+"_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "mart_"+args.net,args.low_mode+"_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -83,7 +85,7 @@ writer = SummaryWriter(exp_name)
 
 # model dict
 net_dict = {"VGG19":VGG('VGG19'),
-            "ResNet18": ResNet18(num_classes=6),
+            "ResNet18": ResNet18(num_classes=10),
             "ResNet18_cosine":ResNet18_cosine(),
             "PreActResNet18": PreActResNet18(),
             "GoogLeNet":GoogLeNet(),
@@ -98,7 +100,9 @@ net_dict = {"VGG19":VGG('VGG19'),
             "EfficientNetB0":EfficientNetB0(),
             "RegNetX_200MF":RegNetX_200MF(),
             "WideResNet":WideResNet(),
-            "HBPNet":HBPNet()
+            "HBPNet":HBPNet(),
+            "AA_Wide_ResNet":AA_Wide_ResNet(),
+            "CBAM":ResidualNet()
 }
 
 # Model
@@ -117,9 +121,11 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+# trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = ImageFolder(os.path.join('data/CIFAR10/train',args.low_mode), transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+# testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = ImageFolder(os.path.join('data/CIFAR10/test',args.low_mode), transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
@@ -162,8 +168,6 @@ def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        print(model(data).size())
-        #
         # # filter out
         # mask = (target<8) & (target>1)
         # data = data[mask]
@@ -197,8 +201,8 @@ def test(epoch):
     correct = 0
     total = 0
 
-    adv_stat_correct = torch.zeros([6]).cuda()
-    adv_stat_total = torch.zeros([6]).cuda()
+    adv_stat_correct = torch.zeros([10]).cuda()
+    adv_stat_total = torch.zeros([10]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)

@@ -106,6 +106,7 @@ loss_dict = {
              "atrades":advanced_trades_loss,
              "atrades-w":advanced_trades_whole_loss,
              "atrades-mentor": advanced_trades_mentor_loss,
+             "atrades-v2":advanced_v2_trades_loss,
              }
 criterion = loss_dict[args.loss]
 
