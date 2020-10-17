@@ -293,7 +293,6 @@ def trades_loss(model,
     true_adv_probs = torch.gather(adv_probs, 1, (y.unsqueeze(1)).long()).squeeze()
 
 
-
     # calculate robust loss
     logits = model(x_natural)
     loss_natural = F.cross_entropy(logits, y)

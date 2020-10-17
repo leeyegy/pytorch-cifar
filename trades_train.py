@@ -147,7 +147,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
     # define hard example pool
     hard_natural = torch.ones([args.batch_size, 3, 32, 32]).to(device)
     hard_count = 0
-    hard_y = torch.zeros([args.batch_size, 1]).to(device)
+    hard_y = torch.zeros([args.batch_size]).to(device)
 
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -170,7 +170,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         print(true_adv_probs.size())
         _, index = torch.sort(true_adv_probs)
         hard_natural[hard_count:hard_count + 16] = data[index[0:16]].clone().detach()
-        hard_y[hard_count:hard_count + 16] = y[index[0:16]].clone().detach()
+        hard_y[hard_count:hard_count + 16] = target[index[0:16]].clone().detach()
 
         # update hard_count
         hard_count += 16
