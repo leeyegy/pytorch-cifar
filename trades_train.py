@@ -147,7 +147,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
     # define hard example pool
     hard_natural = torch.ones([args.batch_size, 3, 32, 32]).to(device)
     hard_count = 0
-    hard_y = torch.zeros([args.batch_size]).to(device)
+    hard_y = torch.zeros([args.batch_size]).long().to(device)
 
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -167,7 +167,6 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.step()
 
         # put the max 128/8 loss
-        print(true_adv_probs.size())
         _, index = torch.sort(true_adv_probs)
         hard_natural[hard_count:hard_count + 16] = data[index[0:16]].clone().detach()
         hard_y[hard_count:hard_count + 16] = target[index[0:16]].clone().detach()
@@ -208,8 +207,6 @@ def test(epoch):
 
     adv_stat_correct = torch.zeros([10]).cuda()
     adv_stat_total = torch.zeros([10]).cuda()
-    adv_stat_output = torch.zeros([10, 10]).cuda()
-    adv_stat_shannon_total = torch.zeros([10]).cuda()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -229,21 +226,18 @@ def test(epoch):
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
-        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
 
 
         progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
-    adv_stat_output /= adv_stat_shannon_total
-    adv_entropy = _calculate_information_entropy(adv_stat_output)
-
-    #monitor shannon - class level
-    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
 
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
+
+    # monitor acc - whole level
+    writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
 
     # Save checkpoint.
     acc = 100.*pgd_correct/total

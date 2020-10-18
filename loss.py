@@ -885,6 +885,100 @@ def ensemble_mart_loss(model,
 #
 #     return loss
 
+def mart_aux_loss(model,
+              x_natural,
+              y,
+              optimizer,
+              step_size=0.007,
+              epsilon=0.031,
+              perturb_steps=10,
+              beta=6.0,
+              distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+
+    # generate aux data
+
+    # # filter out
+    mask = (y<6) & (y>1)
+    x_natural_aux =  x_natural[mask].clone().detach()
+    y_aux = y[mask].clone().detach() - 2
+
+    # generate adversarial example
+    # for main model
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv,mode="main"), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+
+    # for aux model
+    x_adv_aux = x_natural_aux.detach() + 0.001 * torch.randn(x_natural_aux.shape).cuda().detach()
+
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv_aux.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv_aux,mode="aux"), y_aux)
+            grad = torch.autograd.grad(loss_ce, [x_adv_aux])[0]
+            x_adv_aux = x_adv_aux.detach() + step_size * torch.sign(grad.detach())
+            x_adv_aux = torch.min(torch.max(x_adv_aux, x_natural_aux - epsilon), x_natural_aux + epsilon)
+            x_adv_aux = torch.clamp(x_adv_aux, 0.0, 1.0)
+    else:
+        x_adv_aux = torch.clamp(x_adv_aux, 0.0, 1.0)
+
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    x_adv_aux = Variable(torch.clamp(x_adv_aux, 0.0, 1.0), requires_grad=False)
+
+    # zero gradient
+    optimizer.zero_grad()
+
+    # for main model
+    logits = model(x_natural,mode="main")
+    logits_adv = model(x_adv,mode="main")
+
+    adv_probs = F.softmax(logits_adv, dim=1)
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
+
+    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    nat_probs = F.softmax(logits, dim=1)
+    true_probs = torch.gather(nat_probs, 1, (y.unsqueeze(1)).long()).squeeze()
+
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+    loss_main = loss_adv + float(beta) * loss_robust
+
+    # for aux model
+    batch_size_aux = x_natural_aux.size()[0]
+    logits_aux = model(x_natural_aux,mode="aux")
+    logits_adv_aux = model(x_adv_aux,mode="aux")
+
+    adv_probs_aux = F.softmax(logits_adv_aux, dim=1)
+    tmp1_aux = torch.argsort(adv_probs_aux, dim=1)[:, -2:]
+    new_y_aux = torch.where(tmp1_aux[:, -1] == y_aux, tmp1_aux[:, -2], tmp1_aux[:, -1])
+
+    loss_adv_aux = F.cross_entropy(logits_adv_aux, y_aux) + F.nll_loss(torch.log(1.0001 - adv_probs_aux + 1e-12), new_y_aux)
+    nat_probs_aux = F.softmax(logits_aux, dim=1)
+    true_probs_aux = torch.gather(nat_probs_aux, 1, (y_aux.unsqueeze(1)).long()).squeeze()
+
+    loss_robust_aux = (1.0 / batch_size_aux) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs_aux + 1e-12), nat_probs_aux), dim=1) * (1.0000001 - true_probs_aux))
+    loss_aux = loss_adv_aux + float(beta) * loss_robust_aux
+
+    loss = loss_main + loss_aux
+    return loss
+
 def mart_loss(model,
               x_natural,
               y,
