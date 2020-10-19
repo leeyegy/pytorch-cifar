@@ -20,6 +20,7 @@ from advertorch.context import ctx_noparamgrad_and_eval
 from tensorboardX import SummaryWriter
 from util.analyze_easy_hard import _analyze_correct_class_level,_average_output_class_level,_calculate_information_entropy
 from autoattack import AutoAttack
+from attack import *
 
 
 
@@ -70,8 +71,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","mart_aux_"+args.net,"conv2_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "mart_aux_"+args.net,"conv2_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","mart_aux_"+args.net,"gamma_1_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "mart_aux_"+args.net,"gamma_1_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -147,7 +148,8 @@ if args.resume_last:
     print('==> Resuming from checkpoint {}'.format(start_epoch))
 
 #define adversary
-PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+PGD_adversary = PGD(model=net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10)
+# PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)PGD
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -189,7 +191,7 @@ def test(epoch):
         inputs, targets = inputs.to(device), targets.to(device)
 
         with torch.no_grad():
-            outputs = net(inputs)
+            outputs = net(inputs)[0]
         total += targets.size(0)
         correct += get_correct_num(outputs,targets,"CE")
 
@@ -198,7 +200,7 @@ def test(epoch):
         # pgd_data = AA_adversary.run_standard_evaluation(inputs, targets, bs=args.test_batch_size)
 
         with torch.no_grad():
-            outputs = net(pgd_data)
+            outputs = net(pgd_data)[0]
         pgd_correct += get_correct_num(outputs,targets,"CE")
 
         # for tensorboard
@@ -212,7 +214,7 @@ def test(epoch):
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
 
     #monitor acc - class level
-    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(4)},epoch)
+    writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
 
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
