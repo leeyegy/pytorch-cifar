@@ -960,9 +960,14 @@ def mart_aux_loss(model,
 
     # 针对产生的对抗样本，产生对应的切割并且shuffle之后的样本，定义label_swap；并且将两部分数据合并之后再次shuffle
     x_adv_shuffled = x_adv.clone().detach()
-    x_adv_shuffled = rbs_transformation(x_adv_shuffled, 8)
+    x_adv_shuffled = torch.from_numpy(np.transpose(rbs_transformation(np.transpose(x_adv_shuffled.cpu().numpy(),(0,2,3,1)), 4),(0,3,1,2))).cuda()
+    # # debug 检验shuffle之后的图片的效果
+    # import cv2
+    # cv2.imwrite("test.png", np.transpose(x_adv_shuffled[0].cpu().numpy(), [1, 2, 0]) * 255)
+    # return
+
     label_swap_ori = y.clone().detach()
-    label_swap_shuffled = y.clone.detach()+10
+    label_swap_shuffled = y.clone().detach()+10
     # 合并数据
     x_adv_all = torch.ones([x_natural.size()[0]*2,3,32,32]).to(x_adv)
     x_adv_all[0:x_adv.size()[0]] = x_adv
@@ -971,13 +976,13 @@ def mart_aux_loss(model,
     y_swap_all = label_swap_ori.repeat(2)
     y_swap_all[x_adv.size()[0]:x_natural.size()[0]*2] = label_swap_shuffled
     # 生成随机排列
-    mask = np.random.permutation(x_natural.size[0]*2)
+    mask = np.random.permutation(x_natural.size()[0]*2)
+
     x_adv_all = x_adv_all[mask]
     y_all = y_all[mask]
     y_swap_all = y_swap_all[mask]
     x_natural = x_natural.repeat(2,1,1,1)
     x_natural = x_natural[mask]
-
 
     model.train()
 

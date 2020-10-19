@@ -184,7 +184,7 @@ class ResNet_auxiliary(nn.Module):
         ans.append(self.classifier(out))
 
         # aux
-        ans.append(self.classifier_swap[out])
+        ans.append(self.classifier_swap(out))
         return ans
 
 class ResNet(nn.Module):
