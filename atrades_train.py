@@ -108,6 +108,7 @@ loss_dict = {
              "atrades-mentor": advanced_trades_mentor_loss,
              "atrades-v2":advanced_v2_trades_loss,
              "atrades-v3":advanced_v3_trades_loss,
+             "threshold":trades_threshold_loss,
              }
 criterion = loss_dict[args.loss]
 
@@ -157,13 +158,25 @@ PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsi
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+    filtered_num = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = criterion(model=model,
+        if args.loss != "threshold":
+            loss = criterion(model=model,
+                             x_natural=data,
+                             y=target,
+                             optimizer=optimizer,
+                             step_size=args.step_size,
+                             epsilon=args.epsilon,
+                             gamma=args.gamma,
+                             perturb_steps=args.num_steps,
+                             beta=args.beta)
+        else:
+            loss,filtered_size = criterion(model=model,
                            x_natural=data,
                            y=target,
                            optimizer=optimizer,
@@ -172,6 +185,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
                            gamma=args.gamma,
                            perturb_steps=args.num_steps,
                            beta=args.beta)
+            filtered_num += data.size()[0] - filtered_size
+
         loss.backward()
         optimizer.step()
 
@@ -180,6 +195,10 @@ def train(args, model, device, train_loader, optimizer, epoch):
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader), loss.item()))
+    # monitor filter num
+    if args.loss == "threshold":
+        writer.add_scalar("train_filtered_num",filtered_num,epoch)
+        print("被过滤的数量:{}".format(filtered_num))
 
 def test(epoch):
     global best_acc
@@ -190,8 +209,7 @@ def test(epoch):
 
     adv_stat_correct = torch.zeros([10]).cuda()
     adv_stat_total = torch.zeros([10]).cuda()
-    adv_stat_output = torch.zeros([10, 10]).cuda()
-    adv_stat_shannon_total = torch.zeros([10]).cuda()
+
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -211,18 +229,14 @@ def test(epoch):
         # for tensorboard
         prediction = outputs.max(1,keepdim=True)[1].view_as(targets)
         _analyze_correct_class_level(prediction, targets, adv_stat_correct, adv_stat_total)
-        _average_output_class_level(F.softmax(outputs,dim=1), targets, adv_stat_output, adv_stat_shannon_total)
 
 
         progress_bar(batch_idx, len(test_loader), '| Acc: %.3f%% (%d/%d) PgdAcc:%.3f%% (%d/%d)'
                      % (100.*correct/total, correct, total,100.*pgd_correct/total,pgd_correct,total))
 
     adv_stat_correct = 100.0 * adv_stat_correct / adv_stat_total
-    adv_stat_output /= adv_stat_shannon_total
-    adv_entropy = _calculate_information_entropy(adv_stat_output)
 
-    #monitor shannon - class level
-    writer.add_scalars("test_adv_shannon_class_level",{str(i): adv_entropy[i] for i in range(10)},epoch)
+
 
     #monitor acc - class level
     writer.add_scalars("test_adv_acc_class_level",{str(i): adv_stat_correct[i] for i in range(10)},epoch)
@@ -243,7 +257,7 @@ def test(epoch):
             os.mkdir('checkpoint')
         torch.save(state, os.path.join(save_path,'ckpt.pth'))
         best_acc = acc
-    if epoch == 119:
+    if epoch == args.epochs-1:
         print('Saving Last..')
         state = {
             'net': net.state_dict(),
@@ -269,7 +283,7 @@ def adjust_learning_rate(optimizer, epoch):
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 
-for epoch in range(start_epoch, 120):
+for epoch in range(start_epoch, args.epochs):
     adjust_learning_rate(optimizer,epoch)
     train(args, net, device, train_loader, optimizer, epoch)
     test(epoch)
