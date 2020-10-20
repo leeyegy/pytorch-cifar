@@ -18,7 +18,7 @@ class PGD():
         for _ in range(self.perturb_steps):
             x_adv.requires_grad_()
             with torch.enable_grad():
-                _,output = self.model(x_adv)[0]
+                output = self.model(x_adv)[0]
                 loss = self.loss(output,y)
             grad = torch.autograd.grad(loss, [x_adv])[0]
             x_adv = x_adv.detach() + self.step_size * torch.sign(grad.detach())
