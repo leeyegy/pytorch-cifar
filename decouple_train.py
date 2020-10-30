@@ -57,6 +57,7 @@ parser.add_argument('--resume_last', default=False, action='store_true',
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument("--classify-loss",type=str,default="mart")
+parser.add_argument("--norm_weight",type=str,default="normalize",choices=["normalize","normal"])
 
 args = parser.parse_args()
 
@@ -72,8 +73,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,args.norm_weight+"_mart_5_weight_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,args.norm_weight+"_mart_5_weight_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -374,17 +375,19 @@ for epoch in range(start_epoch, args.epochs):
     # adjust_learning_rate(representation_optimizer,epoch)
     train(args, net, device, train_loader, classifier_optimizer, epoch)
 
-    # classifier层weight长度正则
-    model_dict = net.state_dict()
-    for name,param in net.named_parameters():
-        if "linear" in name and "bias" not in name:
-            # update weight
-            cls_weight = param.clone().detach()
-            for i in range(cls_weight.size()[0]):
-                cls_weight[i] /= torch.norm(cls_weight[i])
-            state_dict = {name:cls_weight}
-            model_dict.update(state_dict)
-            net.load_state_dict(model_dict)
+    if args.norm_weight == "normalize":
+        print("normalize weight of classifier~")
+        # classifier层weight长度正则
+        model_dict = net.state_dict()
+        for name,param in net.named_parameters():
+            if "linear" in name and "bias" not in name:
+                # update weight
+                cls_weight = param.clone().detach()
+                for i in range(cls_weight.size()[0]):
+                    cls_weight[i] /= torch.norm(cls_weight[i])
+                state_dict = {name:cls_weight}
+                model_dict.update(state_dict)
+                net.load_state_dict(model_dict)
 
     test(epoch)
     writer.close()
