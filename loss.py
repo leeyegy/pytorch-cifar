@@ -274,6 +274,115 @@ def trades_threshold_loss(model,
 
     return loss,batch_size
 
+
+def weight_penalization_loss(model,
+                x_natural,
+                y,
+                optimizer,
+                step_size=0.003,
+                epsilon=0.031,
+                perturb_steps=10,
+                beta=1.0,
+                distance='l_inf'):
+    model.eval()
+
+    # generate adversarial example
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    for _ in range(perturb_steps):
+        x_adv.requires_grad_()
+        with torch.enable_grad():
+            loss_ce = F.cross_entropy(model(x_adv), y)
+        grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+        x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+        x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    # calculate adv loss
+    logits_adv = model(x_adv)
+    loss_adv = F.cross_entropy(logits_adv, y)
+
+
+    # calculate weight loss
+    for name,param in model.named_parameters():
+        if "linear" in name and "bias" not in name:
+            cls_weight = param
+            dis = torch.ones([10]).cuda()
+            closest_sim = torch.ones([10]).cuda()
+            for i in range(cls_weight.size()[0]):
+                for k in range(cls_weight.size()[0]):
+                    dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[k],0))
+                sorted,index = torch.sort(dis)
+                closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
+            # print(closest_sim)
+            loss_weight = torch.mean(closest_sim)
+
+    loss = loss_adv + beta * loss_weight
+    return loss
+
+def weight_penalization_mart_loss(model,
+                x_natural,
+                y,
+                optimizer,
+                step_size=0.003,
+                epsilon=0.031,
+                perturb_steps=10,
+                beta=5.0,
+                distance='l_inf'):
+    kl = nn.KLDivLoss(reduction='none')
+    model.eval()
+    batch_size = len(x_natural)
+    # generate adversarial example
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_ce = F.cross_entropy(model(x_adv), y)
+            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+    logits = model(x_natural)
+    logits_adv = model(x_adv)
+    adv_probs = F.softmax(logits_adv, dim=1)
+    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
+
+    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    nat_probs = F.softmax(logits, dim=1)
+    true_probs = torch.gather(nat_probs, 1, (y.unsqueeze(1)).long()).squeeze()
+    loss_robust = (1.0 / batch_size) * torch.sum(
+        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+
+    # calculate weight loss
+    for name,param in model.named_parameters():
+        if "linear" in name and "bias" not in name:
+            cls_weight = param
+            dis = torch.ones([10]).cuda()
+            closest_sim = torch.ones([10]).cuda()
+            for i in range(cls_weight.size()[0]):
+                for k in range(cls_weight.size()[0]):
+                    dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[k],0))
+                sorted,index = torch.sort(dis)
+                closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
+            loss_weight = torch.mean(closest_sim)
+
+    loss = loss_adv + 5.0 * loss_robust + float(beta) * loss_weight
+
+    return loss
+
 def trades_loss(model,
                 x_natural,
                 y,
@@ -1198,7 +1307,6 @@ def mart_loss(model,
     adv_probs = F.softmax(logits_adv, dim=1)
 
     tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
-
     new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
 
     loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)

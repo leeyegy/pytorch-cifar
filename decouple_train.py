@@ -72,8 +72,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,args.classify_loss+"_all_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,args.classify_loss+"_all_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -130,8 +130,20 @@ test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_si
 
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
-
 assert not (args.resume_best and args.resume_last)
+
+# init from pre-trained model
+# checkpoint = torch.load(os.path.join("checkpoint","mart_ResNet18","beta_5","ckpt.pth"))
+# checkpoint = torch.load(os.path.join("checkpoint","decouple_Decouple18","weight_beta_10.0","ckpt.pth"))
+# checkpoint = torch.load(os.path.join("checkpoint","decouple_Decouple18","weight_beta_6.0","ckpt.pth"))
+# net.load_state_dict(checkpoint['net'])
+# print(checkpoint['acc'])
+
+# save_model = checkpoint['net']
+# model_dict =  net.state_dict()
+# state_dict = {k:v for k,v in save_model.items() if k in model_dict.keys()}
+# model_dict.update(state_dict)
+# net.load_state_dict(model_dict)
 
 if args.resume_best:
     # Load checkpoint.
@@ -153,8 +165,9 @@ if args.resume_last:
     print('==> Resuming from checkpoint {}'.format(start_epoch))
 
 #define adversary
-adversary = PGD(model=net,eps=args.epsilon,perturb_steps=args.num_steps,step_size=args.step_size) # for train
-PGD_adversary = PGD(model=net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10) # for test
+# adversary = PGD(model=net,eps=args.epsilon,perturb_steps=args.num_steps,step_size=args.step_size) # for train
+# PGD_adversary = PGD(model=net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10) # for test
+PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 
 # PGD_adversary = PGD(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
@@ -176,7 +189,7 @@ def freeze(model, train_mode="classifier"):
     if train_mode == "classifier":
         # 冻结非linear的参数
         for name, param in model.named_parameters():
-            param.requires_grad = True # train all layer
+            param.requires_grad = True
             # if "linear" in name:
             #     param.requires_grad = True
             # else:
@@ -191,34 +204,57 @@ def freeze(model, train_mode="classifier"):
     else:
         raise
 
-
-def train(args, model, device, train_loader, classifier_optimizer,representation_optimizer, epoch):
+def train(args, model, device, train_loader, classifier_optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        # generate adv data
-        with ctx_noparamgrad_and_eval(net):
-            adv_data = adversary.perturb(data.clone().detach(), target)
-
-        # optimize representation
-        representation_optimizer.zero_grad()
-        freeze(model,train_mode="representation")
-        loss_ = representation_loss(model,data,adv_data,target)
-        loss_.backward()
-        representation_optimizer.step()
-
         # optimize classifier
         classifier_optimizer.zero_grad()
-        freeze(model,train_mode="classifier")
-        loss = classifier_loss(model,data,adv_data,target,args.beta)
+        loss = weight_penalization_mart_loss(model=model,
+                                 x_natural=data,
+                                 y=target,
+                                 optimizer=classifier_optimizer,
+                                 step_size=args.step_size,
+                                 epsilon=args.epsilon,
+                                 perturb_steps=args.num_steps,
+                                 beta=args.beta,
+                                 distance='l_inf')
         loss.backward()
         classifier_optimizer.step()
 
         # print progress
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\trepresentation loss: {:.6f} classifier loss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\t classifier loss: {:.6f} '.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss_.item(),loss.item()))
+                       100. * batch_idx / len(train_loader),loss.item()))
+#
+# def train(args, model, device, train_loader, classifier_optimizer,representation_optimizer, epoch):
+#     model.train()
+#     for batch_idx, (data, target) in enumerate(train_loader):
+#         data, target = data.to(device), target.to(device)
+#         # generate adv data
+#         with ctx_noparamgrad_and_eval(net):
+#             adv_data = adversary.perturb(data.clone().detach(), target)
+#
+#         # optimize representation
+#         representation_optimizer.zero_grad()
+#         freeze(model,train_mode="representation")
+#         loss_ = representation_loss(model,data,adv_data,target)
+#         loss_.backward()
+#         representation_optimizer.step()
+#
+#         # optimize classifier
+#         classifier_optimizer.zero_grad()
+#         freeze(model,train_mode="classifier")
+#         loss = classifier_loss(model,data,adv_data,target,args.beta)
+#         loss.backward()
+#         classifier_optimizer.step()
+#
+#         # print progress
+#         if batch_idx % args.log_interval == 0:
+#             print('Train Epoch: {} [{}/{} ({:.0f}%)]\trepresentation loss: {:.6f} classifier loss: {:.6f}'.format(
+#                 epoch, batch_idx * len(data), len(train_loader.dataset),
+#                        100. * batch_idx / len(train_loader), loss_.item(),loss.item()))
 
 def test(epoch):
     global best_acc
@@ -233,7 +269,7 @@ def test(epoch):
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
         with torch.no_grad():
-            _,outputs = net(inputs)
+            outputs = net(inputs)
         total += targets.size(0)
         correct += get_correct_num(outputs,targets,"CE")
 
@@ -241,7 +277,7 @@ def test(epoch):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
 
         with torch.no_grad():
-            _,outputs = net(pgd_data)
+            outputs = net(pgd_data)
         pgd_correct += get_correct_num(outputs,targets,"CE")
 
         # for tensorboard
@@ -259,7 +295,6 @@ def test(epoch):
 
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
-
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
@@ -289,14 +324,67 @@ freeze(net,train_mode="classifier")
 classifier_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 
-freeze(net,train_mode="representation")
-representation_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
-                      momentum=args.momentum, weight_decay=args.weight_decay)
+# freeze(net,train_mode="representation")
+# representation_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
+#                       momentum=args.momentum, weight_decay=args.weight_decay)
 
 for epoch in range(start_epoch, args.epochs):
+    # classifier层weight长度正则
+    # model_dict = net.state_dict()
+    # for name,param in net.named_parameters():
+    #     if "linear" in name and "bias" not in name:
+    #         # update weight
+    #         cls_weight = param.clone().detach()
+            # for i in range(cls_weight.size()[0]):
+            #     cls_weight[i] /= torch.norm(cls_weight[i])
+            # state_dict = {name:cls_weight}
+            # model_dict.update(state_dict)
+            # net.load_state_dict(model_dict)
+
+            # u,s,v = torch.svd(cls_weight)
+            # print(s)
+            # # cover = u @ torch.diag(s)
+            # # print(cover.size())
+            # # cover = cover @ v.T
+            # # print(cover.size())
+            # # print(cover-cls_weight)
+            # # print("对线性层512*10进行奇异值分解的结果的特征值：")
+            # new_weight = u[:,0:9] @ torch.diag(s[0:9])
+            # new_weight = new_weight @ (v[:,0:9]).T
+            # print(new_weight.size())
+            #
+            # u,s,v = torch.svd(new_weight)
+            # print(s)
+
+            # dis = torch.ones([10]).cuda()
+            # closest_sim = torch.ones([10]).cuda()
+            # for i in range(cls_weight.size()[0]):
+            #     print(torch.norm(cls_weight[i]))
+            #     for k in range(cls_weight.size()[0]):
+            #         dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[k],0))
+            #     sorted,index = torch.sort(dis)
+            #     print("第{}类与第{}类的余弦距离最近：{}".format(i,index[1],dis[index[1]]))
+            #     print("第{}类与第{}类的余弦距离最远：{}".format(i,index[9],dis[index[9]]))
+            #
+            #     closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
+            # print(closest_sim)
+
     print("==========Epoch:{}===========".format(epoch))
     adjust_learning_rate(classifier_optimizer,epoch)
-    adjust_learning_rate(representation_optimizer,epoch)
-    train(args, net, device, train_loader, classifier_optimizer,representation_optimizer, epoch)
+    # adjust_learning_rate(representation_optimizer,epoch)
+    train(args, net, device, train_loader, classifier_optimizer, epoch)
+
+    # classifier层weight长度正则
+    model_dict = net.state_dict()
+    for name,param in net.named_parameters():
+        if "linear" in name and "bias" not in name:
+            # update weight
+            cls_weight = param.clone().detach()
+            for i in range(cls_weight.size()[0]):
+                cls_weight[i] /= torch.norm(cls_weight[i])
+            state_dict = {name:cls_weight}
+            model_dict.update(state_dict)
+            net.load_state_dict(model_dict)
+
     test(epoch)
     writer.close()
