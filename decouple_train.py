@@ -73,8 +73,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,args.norm_weight+"_mart_5_weight_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,args.norm_weight+"_mart_5_weight_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,args.norm_weight+"_blend_1_mart_5_weight_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,args.norm_weight+"_blend_1_mart_5_weight_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -135,7 +135,7 @@ assert not (args.resume_best and args.resume_last)
 
 # init from pre-trained model
 # checkpoint = torch.load(os.path.join("checkpoint","mart_ResNet18","beta_5","ckpt.pth"))
-# checkpoint = torch.load(os.path.join("checkpoint","decouple_Decouple18","weight_beta_10.0","ckpt.pth"))
+# checkpoint = torch.load(os.path.join("checkpoint","decouple_Decouple18","mart_5_weight_beta_15.0","ckpt.pth"))
 # checkpoint = torch.load(os.path.join("checkpoint","decouple_Decouple18","weight_beta_6.0","ckpt.pth"))
 # net.load_state_dict(checkpoint['net'])
 # print(checkpoint['acc'])
@@ -179,10 +179,13 @@ def adjust_learning_rate(optimizer, epoch):
     lr = args.lr
     if epoch >= 100:
         lr = args.lr * 0.001
+        args.beta = 1.0
     elif epoch >= 90:
         lr = args.lr * 0.01
+        args.beta = 1.0
     elif epoch >= 75:
         lr = args.lr * 0.1
+        args.beta = 1.0
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
@@ -207,11 +210,13 @@ def freeze(model, train_mode="classifier"):
 
 def train(args, model, device, train_loader, classifier_optimizer, epoch):
     model.train()
+    print("BETA:{}".format(args.beta))
+    mean_loss,mean_loss_mart,mean_loss_weight=0,0,0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # optimize classifier
         classifier_optimizer.zero_grad()
-        loss = weight_penalization_mart_loss(model=model,
+        loss,loss_mart,loss_weight = weight_penalization_mart_loss(model=model,
                                  x_natural=data,
                                  y=target,
                                  optimizer=classifier_optimizer,
@@ -223,12 +228,23 @@ def train(args, model, device, train_loader, classifier_optimizer, epoch):
         loss.backward()
         classifier_optimizer.step()
 
+        # loss related
+        mean_loss += loss.item()
+        mean_loss_weight += loss_weight.item()
+        mean_loss_mart += loss_mart.item()
+
         # print progress
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\t classifier loss: {:.6f} '.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader),loss.item()))
-#
+
+    #monitor train loss sub item
+    writer.add_scalars("train_loss_sub_items",{"mart_loss":mean_loss_mart/len(train_loader),"weight_loss":mean_loss_weight/len(train_loader)},epoch)
+
+    #monitor train loss total
+    writer.add_scalar("train_loss",mean_loss/len(train_loader),epoch)
+
 # def train(args, model, device, train_loader, classifier_optimizer,representation_optimizer, epoch):
 #     model.train()
 #     for batch_idx, (data, target) in enumerate(train_loader):
@@ -296,6 +312,7 @@ def test(epoch):
 
     #monitor acc - class level
     writer.add_scalar("test_adv_acc",100.*pgd_correct/total,epoch)
+
     # Save checkpoint.
     acc = 100.*pgd_correct/total
     if acc > best_acc:
@@ -307,7 +324,7 @@ def test(epoch):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, os.path.join(save_path,'ckpt.pth'))
+        torch.save(state, os.path.join(save_path,'ckpt-{}.pth'.format(epoch)))
         best_acc = acc
     if epoch == args.epochs-1:
         print('Saving Last..')
@@ -330,45 +347,46 @@ classifier_optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameter
 #                       momentum=args.momentum, weight_decay=args.weight_decay)
 
 for epoch in range(start_epoch, args.epochs):
-    # classifier层weight长度正则
+    # # classifier层weight长度正则
     # model_dict = net.state_dict()
     # for name,param in net.named_parameters():
     #     if "linear" in name and "bias" not in name:
-    #         # update weight
     #         cls_weight = param.clone().detach()
-            # for i in range(cls_weight.size()[0]):
-            #     cls_weight[i] /= torch.norm(cls_weight[i])
-            # state_dict = {name:cls_weight}
-            # model_dict.update(state_dict)
-            # net.load_state_dict(model_dict)
 
-            # u,s,v = torch.svd(cls_weight)
-            # print(s)
-            # # cover = u @ torch.diag(s)
-            # # print(cover.size())
-            # # cover = cover @ v.T
-            # # print(cover.size())
-            # # print(cover-cls_weight)
-            # # print("对线性层512*10进行奇异值分解的结果的特征值：")
-            # new_weight = u[:,0:9] @ torch.diag(s[0:9])
-            # new_weight = new_weight @ (v[:,0:9]).T
-            # print(new_weight.size())
-            #
-            # u,s,v = torch.svd(new_weight)
-            # print(s)
-
-            # dis = torch.ones([10]).cuda()
-            # closest_sim = torch.ones([10]).cuda()
-            # for i in range(cls_weight.size()[0]):
-            #     print(torch.norm(cls_weight[i]))
-            #     for k in range(cls_weight.size()[0]):
-            #         dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[k],0))
-            #     sorted,index = torch.sort(dis)
-            #     print("第{}类与第{}类的余弦距离最近：{}".format(i,index[1],dis[index[1]]))
-            #     print("第{}类与第{}类的余弦距离最远：{}".format(i,index[9],dis[index[9]]))
-            #
-            #     closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
-            # print(closest_sim)
+    #         # update weight
+    #         # for i in range(cls_weight.size()[0]):
+    #         #     cls_weight[i] /= torch.norm(cls_weight[i])
+    #         # state_dict = {name:cls_weight}
+    #         # model_dict.update(state_dict)
+    #         # net.load_state_dict(model_dict)
+    #
+    #         # 奇异值分解
+    #         # u,s,v = torch.svd(cls_weight)
+    #         # print(s)
+    #         # # cover = u @ torch.diag(s)
+    #         # # print(cover.size())
+    #         # # cover = cover @ v.T
+    #         # # print(cover.size())
+    #         # # print(cover-cls_weight)
+    #         # # print("对线性层512*10进行奇异值分解的结果的特征值：")
+    #         # new_weight = u[:,0:9] @ torch.diag(s[0:9])
+    #         # new_weight = new_weight @ (v[:,0:9]).T
+    #         # print(new_weight.size())
+    #         #
+    #         # u,s,v = torch.svd(new_weight)
+    #         # print(s)
+    #
+    #         # 线性层weight参数距离
+    #         dis = torch.ones([10]).cuda()
+    #         closest_sim = torch.ones([10]).cuda()
+    #         for i in range(cls_weight.size()[0]):
+    #             print("第{}类的权重weight向量的二范数：{}".format(i,torch.norm(cls_weight[i])))
+    #             for k in range(cls_weight.size()[0]):
+    #                 dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[k],0))
+    #             sorted,index = torch.sort(dis)
+    #             print("第{}类与第{}类的余弦距离最近：{}".format(i,index[1],dis[index[1]]))
+    #             print("第{}类与第{}类的余弦距离最远：{}".format(i,index[9],dis[index[9]]))
+    # break
 
     print("==========Epoch:{}===========".format(epoch))
     adjust_learning_rate(classifier_optimizer,epoch)

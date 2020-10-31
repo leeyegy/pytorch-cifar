@@ -379,9 +379,10 @@ def weight_penalization_mart_loss(model,
                 closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
             loss_weight = torch.mean(closest_sim)
 
-    loss = loss_adv + 5.0 * loss_robust + float(beta) * loss_weight
+    loss_mart = loss_adv + 5.0 * loss_robust
+    loss = loss_mart + float(beta) * loss_weight
 
-    return loss
+    return loss , loss_mart , float(beta) * loss_weight
 
 def trades_loss(model,
                 x_natural,
