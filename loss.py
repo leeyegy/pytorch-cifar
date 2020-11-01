@@ -432,7 +432,7 @@ def weight_penalization_loss(model,
             loss_weight = torch.mean(closest_sim)
 
     loss = loss_adv + beta * loss_weight
-    return loss
+    return loss,loss_adv,beta * loss_weight
 
 def weight_penalization_mart_loss(model,
                 x_natural,

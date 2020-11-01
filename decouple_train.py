@@ -72,8 +72,8 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,"mart_5_weight_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,"weight_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,"weight_beta_"+str(args.beta))
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -123,9 +123,9 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
 
 if device == 'cuda':
@@ -207,12 +207,12 @@ def freeze(model, train_mode="classifier"):
 def train(args, model, device, train_loader, classifier_optimizer, epoch):
     model.train()
     print("BETA:{}".format(args.beta))
-    mean_loss,mean_loss_mart,mean_loss_weight=0,0,0
+    mean_loss,mean_loss_adv,mean_loss_weight=0,0,0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         # optimize classifier
         classifier_optimizer.zero_grad()
-        loss,loss_mart,loss_weight = weight_penalization_mart_loss(model=model,
+        loss,loss_adv,loss_weight = weight_penalization_loss(model=model,
                                  x_natural=data,
                                  y=target,
                                  optimizer=classifier_optimizer,
@@ -227,7 +227,7 @@ def train(args, model, device, train_loader, classifier_optimizer, epoch):
         # loss related
         mean_loss += loss.item()
         mean_loss_weight += loss_weight.item()
-        mean_loss_mart += loss_mart.item()
+        mean_loss_adv += loss_adv.item()
 
         # print progress
         if batch_idx % args.log_interval == 0:
@@ -236,7 +236,7 @@ def train(args, model, device, train_loader, classifier_optimizer, epoch):
                        100. * batch_idx / len(train_loader),loss.item()))
 
     #monitor train loss sub item
-    writer.add_scalars("train_loss_sub_items",{"mart_loss":mean_loss_mart/len(train_loader),"weight_loss":mean_loss_weight/len(train_loader)},epoch)
+    writer.add_scalars("train_loss_sub_items",{"adv_loss":mean_loss_adv/len(train_loader),"weight_loss":mean_loss_weight/len(train_loader)},epoch)
 
     #monitor train loss total
     writer.add_scalar("train_loss",mean_loss/len(train_loader),epoch)
