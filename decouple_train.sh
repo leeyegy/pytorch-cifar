@@ -2,7 +2,7 @@ for net in Decouple18
 do
 		for epochs in 100
 		do
-		       for beta in 25
+		       for beta in 15
 		       do
 			for norm_weight in normalize 
 			do

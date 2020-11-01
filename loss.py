@@ -331,61 +331,61 @@ def _cosine_simililarity(x, y):
     # x: (2N, 1, C), y: (1, 2N, C)
     v = F.cosine_similarity(x.unsqueeze(1), y.unsqueeze(0), -1)
     return v
-
-def weight_penalization_loss(model,
-                             x_natural,
-                             y,
-                             optimizer,
-                             step_size=0.003,
-                             epsilon=0.031,
-                             perturb_steps=10,
-                             beta=1.0,
-                             distance='l_inf'):
-    model.eval()
-
-    # generate adversarial example
-    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
-    for _ in range(perturb_steps):
-        x_adv.requires_grad_()
-        with torch.enable_grad():
-            loss_ce = F.cross_entropy(model(x_adv)[0], y)
-        grad = torch.autograd.grad(loss_ce, [x_adv])[0]
-        x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
-        x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
-        x_adv = torch.clamp(x_adv, 0.0, 1.0)
-    model.train()
-
-    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
-    # zero gradient
-    optimizer.zero_grad()
-
-    # calculate adv loss
-    logits_adv,feature_adv = model(x_adv)
-    logits,feature_cln = model(x_natural)
-
-    loss_adv = F.cross_entropy(logits_adv, y)
-
-    # calculate feature loss | 分开方向
-    representations = torch.cat([feature_cln, feature_adv], dim=0)  # (2N, C)
-    similarity_matrix = _cosine_simililarity(representations, representations)  # (2N, 2N)
-
-
-    # calculate weight loss | 分开方向
-    for name, param in model.named_parameters():
-        if "linear" in name and "bias" not in name:
-            cls_weight = param
-            dis = torch.ones([10]).cuda()
-            closest_sim = torch.ones([10]).cuda()
-            for i in range(cls_weight.size()[0]):
-                for k in range(cls_weight.size()[0]):
-                    dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i], 0), torch.unsqueeze(param[k], 0))
-                sorted, index = torch.sort(dis)
-                closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i], 0),
-                                                         torch.unsqueeze(param[index[1]], 0))
-            loss_weight = torch.mean(closest_sim)
-
-    loss = loss_adv + beta * loss_weight
-    return loss
+#
+# def weight_penalization_loss(model,
+#                              x_natural,
+#                              y,
+#                              optimizer,
+#                              step_size=0.003,
+#                              epsilon=0.031,
+#                              perturb_steps=10,
+#                              beta=1.0,
+#                              distance='l_inf'):
+#     model.eval()
+#
+#     # generate adversarial example
+#     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+#     for _ in range(perturb_steps):
+#         x_adv.requires_grad_()
+#         with torch.enable_grad():
+#             loss_ce = F.cross_entropy(model(x_adv)[0], y)
+#         grad = torch.autograd.grad(loss_ce, [x_adv])[0]
+#         x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+#         x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+#         x_adv = torch.clamp(x_adv, 0.0, 1.0)
+#     model.train()
+#
+#     x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+#     # zero gradient
+#     optimizer.zero_grad()
+#
+#     # calculate adv loss
+#     logits_adv,feature_adv = model(x_adv)
+#     logits,feature_cln = model(x_natural)
+#
+#     loss_adv = F.cross_entropy(logits_adv, y)
+#
+#     # # calculate feature loss | 分开方向
+#     # representations = torch.cat([feature_cln, feature_adv], dim=0)  # (2N, C)
+#     # similarity_matrix = _cosine_simililarity(representations, representations)  # (2N, 2N)
+#
+#
+#     # calculate weight loss | 分开方向
+#     for name, param in model.named_parameters():
+#         if "linear" in name and "bias" not in name:
+#             cls_weight = param
+#             dis = torch.ones([10]).cuda()
+#             closest_sim = torch.ones([10]).cuda()
+#             for i in range(cls_weight.size()[0]):
+#                 for k in range(cls_weight.size()[0]):
+#                     dis[k] = 1 - F.cosine_similarity(torch.unsqueeze(param[i], 0), torch.unsqueeze(param[k], 0))
+#                 sorted, index = torch.sort(dis)
+#                 closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i], 0),
+#                                                          torch.unsqueeze(param[index[1]], 0))
+#             loss_weight = torch.mean(closest_sim)
+#
+#     loss = loss_adv + beta * loss_weight
+#     return loss
 
 def weight_penalization_loss(model,
                 x_natural,
@@ -417,9 +417,6 @@ def weight_penalization_loss(model,
     # calculate adv loss
     logits_adv = model(x_adv)
     loss_adv = F.cross_entropy(logits_adv, y)
-
-    # calculate feature loss | 分开方向
-
 
     # calculate weight loss | 分开方向
     for name,param in model.named_parameters():
