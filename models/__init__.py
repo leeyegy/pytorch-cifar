@@ -20,3 +20,4 @@ from .hbp import  *
 from .small_cnn import  *
 from .aa_wideresnet import *
 from .resnet_cbam import *
+from .resnet_tanh import *
