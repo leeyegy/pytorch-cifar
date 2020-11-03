@@ -25,7 +25,7 @@ from loss import  _mart_loss ,_madry_loss
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR MART Defense')
-parser.add_argument('--batch-size', type=int, default=128, metavar='N',
+parser.add_argument('--batch-size', type=int, default=256, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--test-batch-size', type=int, default=100, metavar='N',
                     help='input batch size for testing (default: 100)')
@@ -72,8 +72,10 @@ torch.backends.cudnn.benchmark = True
 
 best_acc = 0
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-save_path = os.path.join("checkpoint","decouple_"+args.net,"weight_beta_"+str(args.beta))
-exp_name = os.path.join("runs", "decouple_"+args.net,"weight_beta_"+str(args.beta))
+save_path = os.path.join("checkpoint","decouple_"+args.net,"metric_beta_"+str(args.beta))
+exp_name = os.path.join("runs", "decouple_"+args.net,"metric_beta_"+str(args.beta))
+# save_path = os.path.join("checkpoint","decouple_"+args.net,"metric")
+# exp_name = os.path.join("runs", "decouple_"+args.net,"metric")
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -106,6 +108,7 @@ loss_dict = {"mart":_mart_loss,
              "madry":_madry_loss,}
 
 classifier_loss = loss_dict[args.classify_loss]
+criterion = MultiSimilarityLoss()
 
 # Model
 print('==> Building model..')
@@ -123,13 +126,13 @@ transform_train = transforms.Compose([
 transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
-trainset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=True, download=True, transform=transform_train)
+trainset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=True, download=True, transform=transform_train)
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=10)
-testset = torchvision.datasets.CIFAR10(root='/data/liyanjie/.torch/datasets/', train=False, download=True, transform=transform_test)
+testset = torchvision.datasets.CIFAR10(root='/home/Leeyegy/.torch/datasets/', train=False, download=True, transform=transform_test)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, num_workers=10)
-
-if device == 'cuda':
-    net = torch.nn.DataParallel(net)
+#
+# if device == 'cuda':
+#     net = torch.nn.DataParallel(net)
 assert not (args.resume_best and args.resume_last)
 
 # init from pre-trained model
@@ -166,8 +169,8 @@ if args.resume_last:
 
 #define adversary
 # adversary = PGD(model=net,eps=args.epsilon,perturb_steps=args.num_steps,step_size=args.step_size) # for train
-# PGD_adversary = PGD(model=net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10) # for test
-PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
+PGD_adversary = PGD(model=net,eps=args.epsilon,perturb_steps=20,step_size=args.epsilon/10) # for test
+# PGD_adversary = LinfPGDAttack(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 
 # PGD_adversary = PGD(net,eps=args.epsilon,nb_iter=20,eps_iter=args.epsilon/10,loss_fn=nn.CrossEntropyLoss(),rand_init=True)
 # AA_adversary = AutoAttack(net, norm='Linf', eps=args.epsilon, version='standard')
@@ -207,12 +210,13 @@ def freeze(model, train_mode="classifier"):
 def train(args, model, device, train_loader, classifier_optimizer, epoch):
     model.train()
     print("BETA:{}".format(args.beta))
-    mean_loss,mean_loss_adv,mean_loss_weight=0,0,0
+    mean_loss,mean_loss_adv,mean_loss_weight,mean_loss_feature=0,0,0,0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
+
         # optimize classifier
         classifier_optimizer.zero_grad()
-        loss,loss_adv,loss_weight = weight_penalization_loss(model=model,
+        loss,loss_adv,loss_weight,loss_feature = weight_penalization_loss(model=model,
                                  x_natural=data,
                                  y=target,
                                  optimizer=classifier_optimizer,
@@ -228,6 +232,7 @@ def train(args, model, device, train_loader, classifier_optimizer, epoch):
         mean_loss += loss.item()
         mean_loss_weight += loss_weight.item()
         mean_loss_adv += loss_adv.item()
+        mean_loss_feature += loss_feature.item()
 
         # print progress
         if batch_idx % args.log_interval == 0:
@@ -236,7 +241,7 @@ def train(args, model, device, train_loader, classifier_optimizer, epoch):
                        100. * batch_idx / len(train_loader),loss.item()))
 
     #monitor train loss sub item
-    writer.add_scalars("train_loss_sub_items",{"adv_loss":mean_loss_adv/len(train_loader),"weight_loss":mean_loss_weight/len(train_loader)},epoch)
+    writer.add_scalars("train_loss_sub_items",{"adv_loss":mean_loss_adv/len(train_loader),"weight_loss":mean_loss_weight/len(train_loader),"feature_loss":mean_loss_feature/len(train_loader)},epoch)
 
     #monitor train loss total
     writer.add_scalar("train_loss",mean_loss/len(train_loader),epoch)
@@ -282,7 +287,7 @@ def test(epoch):
     for batch_idx, (inputs, targets) in enumerate(test_loader):
         inputs, targets = inputs.to(device), targets.to(device)
         with torch.no_grad():
-            outputs = net(inputs)
+            outputs,_ = net(inputs)
         total += targets.size(0)
         correct += get_correct_num(outputs,targets,"CE")
 
@@ -290,7 +295,7 @@ def test(epoch):
             pgd_data = PGD_adversary.perturb(inputs.clone().detach(), targets)
 
         with torch.no_grad():
-            outputs = net(pgd_data)
+            outputs,_ = net(pgd_data)
         pgd_correct += get_correct_num(outputs,targets,"CE")
 
         # for tensorboard

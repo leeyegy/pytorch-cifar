@@ -230,8 +230,9 @@ class ResNet(nn.Module):
         return out
 
 class DecoupleNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=10,apply_FN=False):
         super(DecoupleNet, self).__init__()
+        self.apply_FN = apply_FN
         self.in_planes = 64
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3,
@@ -261,16 +262,16 @@ class DecoupleNet(nn.Module):
         feature = out.view(out.size(0), -1)
 
         # FN and WN
-        feature = F.normalize(feature, p=2, dim=1)
-        for _, module in self.linear.named_modules():
-            if isinstance(module, nn.Linear):
-                module.weight.data = F.normalize(module.weight, p=2, dim=1)
-
+        if self.apply_FN:
+            feature = F.normalize(feature, p=2, dim=1)
+        # for _, module in self.linear.named_modules():
+        #     if isinstance(module, nn.Linear):
+        #         module.weight.data = F.normalize(module.weight, p=2, dim=1)
         out = self.linear(feature)
-        return out
+        return out,feature
 
-def Decouple18(num_classes=10):
-    return DecoupleNet(BasicBlock, [2, 2, 2, 2],num_classes=num_classes)
+def Decouple18(num_classes=10,apply_FN=False):
+    return DecoupleNet(BasicBlock, [2, 2, 2, 2],num_classes=num_classes,apply_FN=apply_FN)
 
 def ResNet18_Representation(num_classes=10):
     return ResNet_Representation(BasicBlock, [2, 2, 2, 2],num_classes=num_classes)

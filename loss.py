@@ -32,6 +32,55 @@ if os.path.exists(os.path.join("checkpoint", 'clean_ce_res18.pth')):
     mentor_checkpoint = torch.load(os.path.join("checkpoint", 'clean_ce_res18.pth'))
     mentor.load_state_dict(mentor_checkpoint['net'])
 
+class MultiSimilarityLoss(nn.Module):
+    def __init__(self, scale_pos=2,scale_neg=40):
+        super(MultiSimilarityLoss, self).__init__()
+        self.thresh = 0.5
+        self.margin = 0.1
+
+        self.scale_pos = scale_pos
+        self.scale_neg = scale_neg
+
+    def forward(self, feats, labels):
+        assert feats.size(0) == labels.size(0), \
+            f"feats.size(0): {feats.size(0)} is not equal to labels.size(0): {labels.size(0)}"
+        batch_size = feats.size(0)
+        sim_mat = torch.matmul(feats, torch.t(feats))
+
+        epsilon = 1e-5
+        loss = list()
+
+        counter_pos_hard = 0
+        counter_neg_hard = 0
+
+        for i in range(batch_size):
+            pos_pair_ = sim_mat[i][labels == labels[i]]
+            pos_pair_ = pos_pair_[pos_pair_ < 1 - epsilon]
+            neg_pair_ = sim_mat[i][labels != labels[i]]
+
+            neg_pair = neg_pair_[neg_pair_ + self.margin > min(pos_pair_)]
+            pos_pair = pos_pair_[pos_pair_ - self.margin < max(neg_pair_)]
+
+            counter_pos_hard += len(pos_pair)
+            counter_neg_hard += len(neg_pair)
+
+            if len(neg_pair) < 1 or len(pos_pair) < 1:
+                continue
+
+            # weighting step
+            pos_loss = 1.0 / self.scale_pos * torch.log(
+                1 + torch.sum(torch.exp(-self.scale_pos * (pos_pair - self.thresh))))
+            neg_loss = 1.0 / self.scale_neg * torch.log(
+                1 + torch.sum(torch.exp(self.scale_neg * (neg_pair - self.thresh))))
+            loss.append(pos_loss + neg_loss)
+
+        print("该batch中正重要样本数量：{} 负重要样本数量：{}".format(counter_pos_hard,counter_neg_hard))
+        if len(loss) == 0:
+            return torch.zeros([], requires_grad=True)
+
+        loss = sum(loss) / batch_size
+        return loss
+
 def advanced_kl_loss(model,
               x_natural,
               y,
@@ -395,6 +444,7 @@ def weight_penalization_loss(model,
                 epsilon=0.031,
                 perturb_steps=10,
                 beta=1.0,
+                gamma=1.0,
                 distance='l_inf'):
     model.eval()
 
@@ -403,7 +453,7 @@ def weight_penalization_loss(model,
     for _ in range(perturb_steps):
         x_adv.requires_grad_()
         with torch.enable_grad():
-            loss_ce = F.cross_entropy(model(x_adv), y)
+            loss_ce = F.cross_entropy(model(x_adv)[0], y)
         grad = torch.autograd.grad(loss_ce, [x_adv])[0]
         x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
         x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -415,8 +465,12 @@ def weight_penalization_loss(model,
     optimizer.zero_grad()
 
     # calculate adv loss
-    logits_adv = model(x_adv)
+    logits_adv,feature_adv = model(x_adv)
     loss_adv = F.cross_entropy(logits_adv, y)
+
+    # calculate feature loss
+    loss_feature = MultiSimilarityLoss()(feature_adv,y)
+
 
     # calculate weight loss | 分开方向
     for name,param in model.named_parameters():
@@ -431,8 +485,8 @@ def weight_penalization_loss(model,
                 closest_sim[i] = 1 + F.cosine_similarity(torch.unsqueeze(param[i],0),torch.unsqueeze(param[index[1]],0))
             loss_weight = torch.mean(closest_sim)
 
-    loss = loss_adv + beta * loss_weight
-    return loss,loss_adv,beta * loss_weight
+    loss = loss_adv + beta * loss_weight + gamma*loss_feature
+    return loss,loss_adv,beta * loss_weight,gamma*loss_feature
 
 def weight_penalization_mart_loss(model,
                 x_natural,
@@ -493,6 +547,56 @@ def weight_penalization_mart_loss(model,
     loss = loss_mart + float(beta) * loss_weight
 
     return loss , loss_mart , float(beta) * loss_weight
+
+def trades_feature_loss(model,
+                x_natural,
+                y,
+                optimizer,
+                step_size=0.003,
+                epsilon=0.031,
+                perturb_steps=10,
+                beta=1.0,
+                gamma = 1.0,
+                distance='l_inf'):
+    # define KL-loss
+    criterion_kl = nn.KLDivLoss(size_average=False)
+    model.eval()
+    batch_size = len(x_natural)
+    # generate adversarial example
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    if distance == 'l_inf':
+        for _ in range(perturb_steps):
+            x_adv.requires_grad_()
+            with torch.enable_grad():
+                loss_kl = criterion_kl(F.log_softmax(model(x_adv)[0], dim=1),
+                                       F.softmax(model(x_natural)[0], dim=1))
+
+            grad = torch.autograd.grad(loss_kl, [x_adv])[0]
+            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    else:
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    model.train()
+
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # zero gradient
+    optimizer.zero_grad()
+
+    # calculate adv loss
+    feature_adv = model(x_adv)[1]
+
+    # calculate robust loss
+    logits = model(x_natural)[0]
+    loss_natural = F.cross_entropy(logits, y)
+    loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv)[0], dim=1),
+                                                    F.softmax(model(x_natural)[0], dim=1))
+
+    # calculate feature loss
+    loss_feature = MultiSimilarityLoss()(feature_adv,y)
+
+    loss = loss_natural + beta * loss_robust + gamma*loss_feature
+    return loss,loss_natural,beta * loss_robust,gamma*loss_feature
 
 def trades_loss(model,
                 x_natural,
