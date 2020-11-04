@@ -58,7 +58,14 @@ class MultiSimilarityLoss(nn.Module):
             pos_pair_ = pos_pair_[pos_pair_ < 1 - epsilon]
             neg_pair_ = sim_mat[i][labels != labels[i]]
 
-            neg_pair = neg_pair_[neg_pair_ + self.margin > min(pos_pair_)]
+            try:
+                neg_pair = neg_pair_[neg_pair_ + self.margin > min(pos_pair_)]
+            except:
+                print("发生异常")
+                print(labels)
+                print("label:{}".format(labels[i]))
+                print(labels == labels[i])
+
             pos_pair = pos_pair_[pos_pair_ - self.margin < max(neg_pair_)]
 
             counter_pos_hard += len(pos_pair)
