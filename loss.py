@@ -45,6 +45,7 @@ class MultiSimilarityLoss(nn.Module):
         assert feats.size(0) == labels.size(0), \
             f"feats.size(0): {feats.size(0)} is not equal to labels.size(0): {labels.size(0)}"
         batch_size = feats.size(0)
+        feats = F.normalize(feats, p=2, dim=1)
         sim_mat = torch.matmul(feats, torch.t(feats))
 
         epsilon = 1e-5
